@@ -1,0 +1,10 @@
+# A sample multi-node cluster config file
+# A three node (two workers, one controller) cluster config
+# To add more worker nodes, add another role: worker to the list
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: cluster
+nodes:
+- role: control-plane
+- role: worker
+- role: worker
