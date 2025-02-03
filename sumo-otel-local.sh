@@ -171,7 +171,7 @@ function uninstall {
     read -p "Are you sure you want to continue? [y/n]" yn
     if [[ $yn =~ ^[Yy]$ ]]; then
         DEFAULT_CLUSTER_NAME="sumo"
-        echo "Listing KinD Clusters on this machine" 
+        echo "Listing Kind Clusters on this machine" 
         echo $(kind get clusters)
         read -p "Type the name of the cluster to continue. Type [exit] to cancel: " CLUSTER_NAME
         : ${CLUSTER_NAME:=${DEFAULT_CLUSTER_NAME}}
@@ -181,6 +181,7 @@ function uninstall {
         else
             echo "Deleting Cluster: ${CLUSTER_NAME}"
             kind delete cluster --name ${CLUSTER_NAME}
+            echo "Stopping and Removing Podman Machine..."
             podman machine stop
             podman machine rm
         fi
