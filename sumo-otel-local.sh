@@ -2,6 +2,20 @@
 
 set -euo pipefail
 
+# Helper Functions
+function help {
+    echo "Usage: $0 [options]"
+    echo "Options:"
+    echo "  -h, --help      Display this help message."
+    echo "  -v, --version   Display the version of the script."
+    echo "  -i, --install   Install the dependencies and setup the environment."
+    echo "  -u, --uninstall Uninstall the dependencies and cleanup the environment."
+}
+
+function version {
+    echo "sumo-otel-local v0.1.0"
+}
+
 # Check Architecture
 ARCH=$(uname -m)
 
@@ -68,8 +82,8 @@ function install_dependencies {
 function setup {
     # Initialise and Start Podman
     if command -v podman &> /dev/null; then
-        PODMAN_MACHINE_STATUS=$(podman machine list | grep -c "running")
-        if [ ${PODMAN_MACHINE_STATUS} -eq 1 ]; then
+        echo "Podman is installed..."
+        if podman machine list | grep -q "running" ; then
             read -p "Podman Machine already running. Would you like to use it? [y/n]" yn
             if [[ $yn =~ ^[Yy]$ ]]; then
                 echo "Using existing Podman machine..."
@@ -127,5 +141,56 @@ function setup {
     --set sumologic.logs.systemd.enabled=false
 }
 
-install_dependencies
-setup
+function uninstall {
+    echo "Caution: This will delete the cluster and remove the Podman machine!"
+    read -p "Are you sure you want to continue? [y/n]" yn
+    if [[ $yn =~ ^[Yy]$ ]]; then
+        DEFAULT_CLUSTER_NAME="sumo"
+        echo "Listing KinD Clusters on this machine" 
+        echo $(kind get clusters)
+        read -p "Type the name of the cluster to continue. Type [exit] to cancel: " CLUSTER_NAME
+        : ${CLUSTER_NAME:=${DEFAULT_CLUSTER_NAME}}
+        if [[ $CLUSTER_NAME == "exit" ]]; then
+            echo "Exiting..."
+            exit 0
+        else
+            echo "Deleting Cluster: ${CLUSTER_NAME}"
+            kind delete cluster --name ${CLUSTER_NAME}
+            podman machine stop
+            podman machine rm
+        fi
+    else
+        echo "Exiting..."
+        exit 0
+    fi
+}
+
+# Parse Arguments
+while [[ $# -gt 0 ]]; do
+    key="$1"
+    case $key in
+        -h|--help)
+            help
+            exit 0
+            ;;
+        -v|--version)
+            version
+            exit 0
+            ;;
+        -i|--install)
+            install_dependencies
+            setup
+            exit 0
+            ;;
+        -u|--uninstall)
+            uninstall
+            exit 0
+            ;;
+        *)
+            echo "Invalid Option: $1"
+            help
+            exit 1
+            ;;
+    esac
+    shift
+done

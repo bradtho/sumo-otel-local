@@ -14,11 +14,23 @@ Clone this repo and run the script
 ```bash
 git clone git@github.com:bradtho/sumo-otel-local.git
 cd sumo-otel-local
-chmod +x install.sh
-./install.sh
+chmod +x sumo-otel-local.sh
+./sumo-otel-local.sh -i
 ```
 
 Follow the in-script prompts.
+
+For additional options use the `help` function
+
+```bash
+./sumo-otel-local.sh -h
+Usage: ./sumo-otel-local.sh [options]
+Options:
+  -h, --help      Display this help message.
+  -v, --version   Display the version of the script.
+  -i, --install   Install the dependencies and setup the environment.
+  -u, --uninstall Uninstall the dependencies and cleanup the environment.
+```
 
 ## Caveat
 
