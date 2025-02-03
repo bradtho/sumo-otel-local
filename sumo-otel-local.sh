@@ -124,8 +124,33 @@ function setup {
 
     # Install Sumo Logic Operator
 
-    read -sp "Enter your SumoLogic Access ID: " ACCESS_ID
-    read -sp "Enter your SumoLogic Access Key: " ACCESS_KEY
+    ACCESS_ID=""
+    ACCESS_ID_VAR="Enter your SumoLogic Access ID: "            # to take password character wise
+    while IFS= read -p "$ACCESS_ID_VAR" -r -s -n 1 letter
+    do
+        if [[ $letter == $'\0' ]]                               #  if enter is pressed, exit the loop
+        then
+            break
+        fi
+        
+        ACCESS_ID+="$letter"                                    # store the letter in ACCESS_ID, use pass+="$letter" for more concise and readable.
+        ACCESS_ID_VAR="*"                                       # in place of password the asterisk (*) will be printed
+    done
+    echo ""
+
+    ACCESS_KEY=""
+    ACCESS_KEY_VAR="Enter your SumoLogic Access Key: "           # to take password character wise
+    while IFS= read -p "$ACCESS_KEY_VAR" -r -s -n 1 letter
+    do
+        if [[ $letter == $'\0' ]]                               #  if enter is pressed, exit the loop
+        then
+            break
+        fi
+        
+        ACCESS_KEY+="$letter"                                   # store the letter in ACCESS_KEY, use VAR+="$letter" for more concise and readable.
+        ACCESS_KEY_VAR="*"                                      # in place of password the asterisk (*) will be printed
+    done
+    echo ""
 
     helm upgrade \
     --install \
