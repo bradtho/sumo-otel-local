@@ -69,7 +69,7 @@ function setup {
     # Initialise and Start Podman
     if command -v podman &> /dev/null; then
         PODMAN_MACHINE_STATUS=$(podman machine list | grep -c "running")
-        if [ ${PODMAN_MACHINE_STATUS} -ge 1 ]; then
+        if [ ${PODMAN_MACHINE_STATUS} -eq 1 ]; then
             read -p "Podman Machine already running. Would you like to use it? [y/n]" yn
             if [[ $yn =~ ^[Yy]$ ]]; then
                 echo "Using existing Podman machine..."
@@ -93,7 +93,13 @@ function setup {
             podman machine start
         fi
     else
-        echo "Podman is not installed."
+        read -p "Podman is not installed. Are you using Docker Desktop? [y/n]" yn
+        if [[ $yn =~ ^[Yy]$ ]]; then
+            echo "Using Docker Desktop..."
+        else
+            echo "Please install Podman or Docker Desktop to continue."
+            exit 1
+        fi
     fi
 
     # Create a cluster
@@ -112,6 +118,7 @@ function setup {
     sumologic sumologic/sumologic \
     --namespace=sumologic \
     --create-namespace \
+    --values values.yaml \
     --set-string sumologic.accessId=${ACCESS_ID} \
     --set-string sumologic.accessKey=${ACCESS_KEY} \
     --set-string sumologic.clusterName=${CLUSTER_NAME} \
