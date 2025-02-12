@@ -11,28 +11,22 @@ This file is used to disable the automatic installation of Sumo Logic Observabil
 To avoid PODS failing to run because the secret "sumologic" is not available, Create the secret manually to fix the setup POD failing to run.
 
 ```bash
-kubectl create secret generic sumologic \
-   --from-literal=endpoint-events="my endpoint events" \
-   --from-literal=endpoint-events-otlp="my endpoint events otlp" \
-   --namespace sumologic
-```
-
-Patch this secret with following data the other configuration required by the failing pods:
-
-```bash
-kubectl patch secret sumologic --namespace sumologic --type='merge' -p '{
-   "data": {
-     "endpoint-metrics-apiserver": "'$(echo -n "https://<endpoint obtained from Data Collection page>" | base64)'",
-     "endpoint-control_plane_metrics_source": "'$(echo -n "https://<endpoint obtained from Data Collection page>" | base64)'",
-     "endpoint-metrics-kube-controller-manager": "'$(echo -n "https://<endpoint obtained from Data Collection page>" | base64)'",
-     "endpoint-metrics": "'$(echo -n "https://<endpoint obtained from Data Collection page>" | base64)'",
-     "endpoint-metrics-otlp": "'$(echo -n "https://<endpoint obtained from Data Collection page>" | base64)'",
-     "endpoint-metrics-kubelet": "'$(echo -n "https://<endpoint obtained from Data Collection page>" | base64)'",
-     "endpoint-metrics-node-exporter": "'$(echo -n "https://<endpoint obtained from Data Collection page>" | base64)'",
-     "endpoint-metrics-kube-scheduler": "'$(echo -n "https://<endpoint obtained from Data Collection page>" | base64)'",
-     "endpoint-metrics-kube-state": "'$(echo -n "https://<endpoint obtained from Data Collection page>" | base64)'"
-    } 
-}'
+kubectl create secret generic sumologic --namespace sumologic \
+  --from-literal=endpoint-metrics-apiserver="https://<endpoint obtained from Data Collection page>" \
+  --from-literal=endpoint-control_plane_metrics_source="https://<endpoint obtained from Data Collection page>" \
+  --from-literal=endpoint-metrics-kube-controller-manager="https://<endpoint obtained from Data Collection page>" \
+  --from-literal=endpoint-metrics="https://<endpoint obtained from Data Collection page>" \
+  --from-literal=endpoint-metrics-otlp="https://<endpoint obtained from Data Collection page>" \
+  --from-literal=endpoint-metrics-kubelet="https://<endpoint obtained from Data Collection page>" \
+  --from-literal=endpoint-metrics-node-exporter="https://<endpoint obtained from Data Collection page>" \
+  --from-literal=endpoint-metrics-kube-scheduler="https://<endpoint obtained from Data Collection page>" \
+  --from-literal=endpoint-metrics-kube-state="https://<endpoint obtained from Data Collection page>" \
+  --from-literal=endpoint-traces="https://<endpoint obtained from Data Collection page>" \
+  --from-literal=endpoint-traces-otlp="https://<endpoint obtained from Data Collection page>" \
+  --from-literal=endpoint-events-otlp="https://<endpoint obtained from Data Collection page>" \
+  --from-literal=endpoint-events="https://<endpoint obtained from Data Collection page>" \
+  --from-literal=endpoint-logs="https://<endpoint obtained from Data Collection page>" \
+  --from-literal=endpoint-logs-otlp="https://<endpoint obtained from Data Collection page>" 
 ```
 
 PODS should now be running and ingesting data to a pre-existed collector within Sumo.
