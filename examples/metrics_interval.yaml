@@ -1,0 +1,5 @@
+sumologic:
+  metrics: 
+    collector:
+      otelcol:
+        scrapeInterval: 30s

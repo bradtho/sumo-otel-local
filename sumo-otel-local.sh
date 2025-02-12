@@ -7,14 +7,12 @@ function help {
     echo "Usage: $0 [options]"
     echo "Options:"
     echo "  -h, --help      Display this help message."
-    echo "  -v, --version   Display the version of the script."
     echo "  -i, --install   Install the dependencies and setup the environment."
+    echo "  -o, --output    Output the rendered Kubernetes manifest YAML file."
     echo "  -u, --uninstall Uninstall the dependencies and cleanup the environment."
+    echo "  -v, --version   Display the version of the script."
 }
 
-function version {
-    echo "sumo-otel-local v0.1.0"
-}
 
 # Check Architecture
 ARCH=$(uname -m)
@@ -79,7 +77,7 @@ function install_dependencies {
     fi
 }
 
-function setup {
+function install {
     # Initialise and Start Podman
     if command -v podman &> /dev/null; then
         echo "Podman is installed..."
@@ -152,18 +150,39 @@ function setup {
     done
     echo ""
 
+    DEFAULT_HELM_VALUES="values.yaml"
+    echo "Additional example values can in the examples folder. When prompted, please provide the path to the values.yaml file. e.g. examples/values.yaml"
+    read -p "Name and Location of the Helm Values file. [default=values.yaml]: " HELM_VALUES
+    : ${HELM_VALUES:=${DEFAULT_HELM_VALUES}}
+
     helm upgrade \
     --install \
     sumologic sumologic/sumologic \
     --namespace=sumologic \
     --create-namespace \
-    --values values.yaml \
+    --values ${HELM_VALUES} \
     --set-string sumologic.accessId=${ACCESS_ID} \
     --set-string sumologic.accessKey=${ACCESS_KEY} \
     --set-string sumologic.clusterName=${CLUSTER_NAME} \
     --set-string fullnameOverride=sumo \
     --set sumologic.falco.enabled=false \
     --set sumologic.logs.systemd.enabled=false
+}
+
+function output {
+    DEFAULT_HELM_VALUES="values.yaml"
+    DEFAULT_K8S_YAML="sumologic-rendered.yaml"
+
+    read -p "Name and Location of the Helm Values file. [default=values.yaml]: " HELM_VALUES
+    : ${HELM_VALUES:=${DEFAULT_HELM_VALUES}}
+    read -p "Name and Location of the rendered Kuberenetes Manifest YAML file. [default=sumologic-rendered.yaml]: " K8S_YAML
+    : ${K8S_YAML:=${DEFAULT_K8S_YAML}}   
+ 
+    helm template \
+    --namespace=sumologic \
+    --create-namespace \
+    -f ${HELM_VALUES} \
+    sumologic sumologic/sumologic | tee ${K8S_YAML}
 }
 
 function uninstall {
@@ -191,6 +210,17 @@ function uninstall {
     fi
 }
 
+function version {
+    RELEASE=$(curl -L -s https://api.github.com/repos/bradtho/sumo-otel-local/releases/latest | jq -r .tag_name)
+    echo "sumo-otel-local ${RELEASE}"
+}
+
+function cleanup {
+    echo "Installation Failed: Cleaning up..."
+    uninstall
+}
+trap cleanup EXIT
+
 # Parse Arguments
 while [[ $# -gt 0 ]]; do
     key="$1"
@@ -199,17 +229,21 @@ while [[ $# -gt 0 ]]; do
             help
             exit 0
             ;;
-        -v|--version)
-            version
-            exit 0
-            ;;
         -i|--install)
             install_dependencies
-            setup
+            install
+            exit 0
+            ;;
+        -o|--output)
+            output
             exit 0
             ;;
         -u|--uninstall)
             uninstall
+            exit 0
+            ;;
+        -v|--version)
+            version
             exit 0
             ;;
         *)

@@ -1,0 +1,7 @@
+sumologic:
+  setupEnabled: false
+  setup:
+    dashboards:
+      enabled: false
+    monitors:
+      enabled: false

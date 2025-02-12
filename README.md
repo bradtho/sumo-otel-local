@@ -27,10 +27,15 @@ For additional options use the `help` function
 Usage: ./sumo-otel-local.sh [options]
 Options:
   -h, --help      Display this help message.
-  -v, --version   Display the version of the script.
   -i, --install   Install the dependencies and setup the environment.
+  -o, --output    Output the rendered Kubernetes manifest YAML file.
   -u, --uninstall Uninstall the dependencies and cleanup the environment.
+  -v, --version   Display the version of the script. 
 ```
+
+## Advanced (Sandpit)
+
+The `examples` folder contains a curated list of advanced implementation methods. Instructions for these are in the [README](./examples/README.md) file in that folder.
 
 ## Caveat
 
