@@ -1,9 +1,4 @@
 sumologic:
-  setup:
-    dashboards:
-      enabled: false
-    monitors:
-      enabled: false
   metrics: 
     collector:
       otelcol:
