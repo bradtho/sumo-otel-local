@@ -1,8 +1,18 @@
 # README for Example Helm Values files
 
+## Table of Contents
+
+1. [Change the Metrics Scrape Interval](#metrics_intervalyaml)
+2. [Add Persistent Volume Claim Metrics](#metrics_pvcyaml)
+3. [Skip Installation](#no_installyaml)
+
 ## metrics_interval.yaml
 
 This file is used to set the [OTel Metrics Scrape Interval](https://help.sumologic.com/docs/send-data/kubernetes/best-practices/#changing-scrape-interval-for-opentelemetry-metrics-collection)
+
+## metrics_pvc.yaml
+
+This file is used to enable the `kubelet_volume_stats_capacity_bytes` and `kubelet_volume_stats_used_bytes` Metrics which allows grants the ability to view Persistent Volume Claim information.
 
 ## no_install.yaml
 

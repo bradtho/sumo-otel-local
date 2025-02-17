@@ -1,0 +1,6 @@
+sumologic:
+  metrics:
+    collector:
+      otelcol:
+        kubelet:
+          metricRegex: (?:kubelet_docker_operations_errors(?:|_total)|kubelet_(?:docker|runtime)_operations_duration_seconds_(?:count|sum)|kubelet_running_(?:container|pod)(?:_count|s)|kubelet_(:?docker|runtime)_operations_latency_microseconds(?:|_count|_sum)|kubelet_volume_stats_capacity_bytes|kubelet_volume_stats_used_bytes)
