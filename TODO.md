@@ -10,6 +10,11 @@ progress; line references point at the current Bash implementation.
 - **Platforms:** Support **macOS + Linux** (was macOS-only). This widens several P0
   items — arch/OS detection, dependency install, and secret storage must not assume
   macOS-only tooling (`brew`, `security`/Keychain).
+- **Releases:** GitHub Releases with semantic versioning. Current latest is `0.4.0`.
+- **Merge rules on `main`:** PRs required, signed commits required, and status
+  checks required (the status-check requirement is *pending* CI via Actions). Admin
+  (repo owner) can bypass. ⇒ commits on `dev` must be **signed** (GPG/SSH) so the
+  eventual `dev → main` PR satisfies the rule without an admin override.
 
 ---
 
@@ -51,6 +56,29 @@ These cause broken installs, surprise destruction, or secret exposure.
 - [ ] **Make memory/CPU minimums configurable** — `MIN_MEM_MB=18432`, `MIN_CPU=4` are
   hardcoded (`sumo-otel-local.sh:274-275`); allow override via flag/env.
 
+## CI/CD & Releases (gates merge to `main`)
+
+The `main` branch now requires passing status checks, so standing up CI is a
+prerequisite for *any* PR merge — treat as high priority alongside P0/P1.
+
+- [ ] **GitHub Actions CI workflow** — `.github/workflows/ci.yml` triggered on PRs and
+  pushes to `dev`. At minimum: `shellcheck` + `shfmt --diff` on `*.sh`, and a YAML lint
+  on `kind-config.yaml` / `values.yaml` / `examples/*.yaml`. Run on both macOS and Linux
+  runners to back the macOS+Linux support goal.
+- [ ] **Register the check as a required status check** on `main` once the workflow name
+  is stable, so the branch-protection rule is actually enforced.
+- [ ] **Mock-deployment validation job** — in CI, stand up a KinD cluster (e.g.
+  `helm/kind-action`), run `helm template`/`helm install --dry-run` (and ideally
+  `helm lint`) against `values.yaml` and the `examples/*.yaml` to prove the chart
+  renders and the manifests apply. Use dummy/placeholder Sumo credentials; do not
+  require real secrets. This validates a deployment without touching a live Sumo org.
+- [ ] **Release automation** — GitHub Releases with SemVer (continue from `0.4.0`).
+  Tag-driven workflow (`v*.*.*`) that builds release notes (e.g. from Conventional
+  Commits) and publishes the release. Update `version()` in `sumo-otel-local.sh:237-240`
+  to report the same version (it currently queries the GitHub API at runtime).
+- [ ] **Adopt a versioning/commit convention** — document SemVer bump rules; consider
+  Conventional Commits so release notes and version bumps can be automated.
+
 ## P2 — Medium (maintainability / cleanup)
 
 - [ ] **Wire up or remove `local-image.sh`** — the pull/load/tag logic is entirely
@@ -84,14 +112,15 @@ Tracked as a deliberate decision rather than a straight task. See "Open Question
   `sumo-otel-local.sh`.
 - [ ] Add a `CLAUDE.md` (run `/init`) documenting structure, prerequisites, and the
   install/uninstall flows.
-- [ ] Add `shellcheck` (and `shfmt`) to a CI workflow while the project remains Bash.
 - [ ] Document the Keychain entries (`sumologic_access_id`/`_key`) and how to rotate them.
+  (`shellcheck`/`shfmt` now tracked under CI/CD & Releases.)
 
 ---
 
 ## Open Questions
 
-1. **Bash or Python?** — primary fork in the road; see P3. What's the appetite for a
-   runtime dependency vs. keeping a dependency-free shell script?
-2. **Docker vs. Podman** — is Podman the supported default, with Docker best-effort?
-3. **Target platforms** — macOS only (current assumption), or should Linux be supported?
+1. **Docker vs. Podman** — is Podman the supported default, with Docker best-effort?
+   Affects how the CI mock-deployment job provisions its container runtime.
+
+*Resolved 2026-06-12: Bash now / Python later (P3); platforms = macOS + Linux;
+commit signing = GPG (already configured locally, `commit.gpgsign=true`).*
