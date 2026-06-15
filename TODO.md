@@ -127,7 +127,9 @@ Tracked as a deliberate decision rather than a straight task. See "Open Question
 - [ ] Add a `CLAUDE.md` (run `/init`) documenting structure, prerequisites, and the
   install/uninstall flows.
 - [ ] Document the Keychain entries (`sumologic_access_id`/`_key`) and how to rotate them.
-  (`shellcheck`/`shfmt` now tracked under CI/CD & Releases.)
+- [x] **`shellcheck` clean** — both `sumo-otel-local.sh` and `local-image.sh` pass
+  `shellcheck` with no findings (quoted expansions, `read -r`, quoted default
+  assignments, arithmetic indices). CI just needs to run it; `shfmt` still TODO.
 
 ---
 
