@@ -25,9 +25,10 @@ progress; line references point at the current Bash implementation.
 
 These cause broken installs, surprise destruction, or secret exposure.
 
-- [ ] **Fix `kind` direct-install platform** — `sumo-otel-local.sh:75` hardcodes
-  `kind-linux-amd64`. Detect OS (`uname -s` → `darwin`/`linux`) and arch, then build
-  `kind-${OS}-${ARCH}`. Same OS-awareness needed for the jq/podman downloads.
+- [x] **Fix `kind` direct-install platform** — done. Added normalized `OS`/`ARCH`
+  detection; `kind`, `kubectl`, and `jq` downloads are now OS+arch aware. Podman's
+  direct install branches: macOS keeps the release zip, Linux defers to the distro
+  package manager (a static binary can't provide a working rootless setup).
 - [ ] **Remove / rework `trap cleanup ERR`** — `sumo-otel-local.sh:404-408`. With
   `set -e`, *any* failed command triggers the interactive `uninstall` flow and can
   delete the user's cluster. Replace with a safe handler that only reports the error.
@@ -40,9 +41,9 @@ These cause broken installs, surprise destruction, or secret exposure.
 - [ ] **Cross-platform secret storage** — `security`/Keychain
   (`sumo-otel-local.sh:117-129,222-234`) is macOS-only. Add a Linux path (e.g.
   `secret-tool`/libsecret, or an env-var fallback) so the install/purge flows work there.
-- [ ] **Fix architecture mapping** — `uname -m` returns `x86_64`/`arm64`, but jq/kind
-  release assets expect `amd64`/`arm64` (`sumo-otel-local.sh:41,64,75`). Add a
-  normalization step so Intel Macs don't hit 404s.
+- [x] **Fix architecture mapping** — done as part of the OS/arch detection above:
+  `x86_64`→`amd64`, `arm64`/`aarch64`→`arm64`, with an explicit error on anything else.
+  Intel Macs no longer hit 404s.
 
 ## P1 — High (reliability / UX correctness)
 

@@ -17,8 +17,33 @@ function help {
 }
 
 
-# Check Architecture
-ARCH=$(uname -m)
+# Detect OS and CPU architecture, normalized to the tokens used by release assets.
+OS_RAW=$(uname -s)
+case "$OS_RAW" in
+    Darwin) OS="darwin" ;;
+    Linux)  OS="linux" ;;
+    *)
+        echo "Unsupported operating system: ${OS_RAW}. Only macOS (Darwin) and Linux are supported."
+        exit 1
+        ;;
+esac
+
+ARCH_RAW=$(uname -m)
+case "$ARCH_RAW" in
+    x86_64|amd64)  ARCH="amd64" ;;
+    arm64|aarch64) ARCH="arm64" ;;
+    *)
+        echo "Unsupported architecture: ${ARCH_RAW}. Only amd64 (x86_64) and arm64 (aarch64) are supported."
+        exit 1
+        ;;
+esac
+
+# jq names its macOS assets "macos" rather than "darwin".
+if [[ "$OS" == "darwin" ]]; then
+    JQ_OS="macos"
+else
+    JQ_OS="linux"
+fi
 
 # Check Dependencies
 function install_dependencies {
@@ -38,13 +63,13 @@ function install_dependencies {
             echo "Installing Dependencies Directly..."
             if ! command -v jq &> /dev/null; then
                 echo "Installing jq..."
-                curl -Lo /usr/local/bin/jq https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-macos-${ARCH} 
+                curl -Lo /usr/local/bin/jq https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-${JQ_OS}-${ARCH}
                 chmod +x /usr/local/bin/jq
             fi
 
             if ! command -v kubectl &> /dev/null; then
                 echo "Installing Kubectl..."
-                curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/darwin/${ARCH}/kubectl"
+                curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/${OS}/${ARCH}/kubectl"
                 chmod +x ./kubectl
                 sudo mv ./kubectl /usr/local/bin/kubectl
                 sudo chown root: /usr/local/bin/kubectl
@@ -60,19 +85,30 @@ function install_dependencies {
 
             if ! command -v docker &> /dev/null && ! command -v podman &> /dev/null; then
                 echo "Installing Podman..."
-                RELEASE=$(curl -L -s https://api.github.com/repos/containers/podman/releases/latest | jq -r .tag_name)
-                curl -Lo ./podman-remote-release-darwin_${ARCH}.zip https://github.com/containers/podman/releases/download/${RELEASE}/podman-remote-release-darwin_${ARCH}.zip
-                unzip podman-remote-release-darwin_${ARCH}.zip
-                chmod +x ./podman-${RELEASE}/usr/bin/podman
-                sudo mv ./podman-${RELEASE}/usr/bin/podman /usr/local/bin/podman
-                chmod +x ./podman-${RELEASE}/usr/bin/podman-mac-helper
-                sudo mv ./podman-${RELEASE}/usr/bin/podman-mac-helper /usr/local/bin/podman-mac-helper
-            fi    
+                if [[ "$OS" == "darwin" ]]; then
+                    RELEASE=$(curl -L -s https://api.github.com/repos/containers/podman/releases/latest | jq -r .tag_name)
+                    curl -Lo ./podman-remote-release-darwin_${ARCH}.zip https://github.com/containers/podman/releases/download/${RELEASE}/podman-remote-release-darwin_${ARCH}.zip
+                    unzip podman-remote-release-darwin_${ARCH}.zip
+                    chmod +x ./podman-${RELEASE}/usr/bin/podman
+                    sudo mv ./podman-${RELEASE}/usr/bin/podman /usr/local/bin/podman
+                    chmod +x ./podman-${RELEASE}/usr/bin/podman-mac-helper
+                    sudo mv ./podman-${RELEASE}/usr/bin/podman-mac-helper /usr/local/bin/podman-mac-helper
+                else
+                    # On Linux, Podman runs natively (no VM/machine) and needs rootless
+                    # dependencies a single static binary can't provide. Defer to the
+                    # distro package manager. See TODO.md (P1 first-class runtime task).
+                    echo "On Linux, install Podman with your distribution's package manager, e.g.:"
+                    echo "  sudo apt-get install -y podman   # Debian/Ubuntu"
+                    echo "  sudo dnf install -y podman       # Fedora/RHEL"
+                    echo "Then re-run this script."
+                    exit 1
+                fi
+            fi
 
             if ! command -v kind &> /dev/null; then
                 echo "Installing Kind..."
                 RELEASE=$(curl -L -s https://api.github.com/repos/kubernetes-sigs/kind/releases/latest | jq -r .tag_name)
-                curl -Lo ./kind https://kind.sigs.k8s.io/dl/${RELEASE}/kind-linux-amd64
+                curl -Lo ./kind https://kind.sigs.k8s.io/dl/${RELEASE}/kind-${OS}-${ARCH}
                 chmod +x ./kind
                 mv ./kind /usr/local/bin/kind
             fi
