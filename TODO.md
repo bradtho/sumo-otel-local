@@ -15,6 +15,9 @@ progress; line references point at the current Bash implementation.
   checks required (the status-check requirement is *pending* CI via Actions). Admin
   (repo owner) can bypass. ⇒ commits on `dev` must be **signed** (GPG/SSH) so the
   eventual `dev → main` PR satisfies the rule without an admin override.
+- **Container runtime:** Docker **and** Podman are both **first-class** (not
+  best-effort). Rationale: Docker Desktop's licensing restricts some users, so Podman
+  must be a fully supported peer. Both must work in the script and be exercised in CI.
 
 ---
 
@@ -55,6 +58,13 @@ These cause broken installs, surprise destruction, or secret exposure.
   with a clear message if the file doesn't exist.
 - [ ] **Make memory/CPU minimums configurable** — `MIN_MEM_MB=18432`, `MIN_CPU=4` are
   hardcoded (`sumo-otel-local.sh:274-275`); allow override via flag/env.
+- [ ] **Treat Docker and Podman as first-class runtimes** — today `init_cluster`
+  centers on Podman and only asks a yes/no "Are you using Docker Desktop?"
+  (`sumo-otel-local.sh:83-98`), while the Podman machine/resource logic
+  (`new_podman`, `use_existing_podman`) has no Docker equivalent. Detect the available
+  runtime, let the user choose when both exist, and gate Podman-machine handling so
+  Docker users get an equivalent (resource check + KinD provider) path. Podman-only
+  operations like `purge` (`:199-216`) must no-op or branch cleanly under Docker.
 
 ## CI/CD & Releases (gates merge to `main`)
 
@@ -72,6 +82,9 @@ prerequisite for *any* PR merge — treat as high priority alongside P0/P1.
   `helm lint`) against `values.yaml` and the `examples/*.yaml` to prove the chart
   renders and the manifests apply. Use dummy/placeholder Sumo credentials; do not
   require real secrets. This validates a deployment without touching a live Sumo org.
+  Exercise **both runtimes**: Docker on Linux runners, and Podman (e.g. via the
+  `redhat-actions/podman` tooling or a Podman-backed KinD provider) so the
+  first-class-both decision is actually verified in CI.
 - [ ] **Release automation** — GitHub Releases with SemVer (continue from `0.4.0`).
   Tag-driven workflow (`v*.*.*`) that builds release notes (e.g. from Conventional
   Commits) and publishes the release. Update `version()` in `sumo-otel-local.sh:237-240`
@@ -119,8 +132,9 @@ Tracked as a deliberate decision rather than a straight task. See "Open Question
 
 ## Open Questions
 
-1. **Docker vs. Podman** — is Podman the supported default, with Docker best-effort?
-   Affects how the CI mock-deployment job provisions its container runtime.
+None currently — see resolved decisions below.
 
 *Resolved 2026-06-12: Bash now / Python later (P3); platforms = macOS + Linux;
 commit signing = GPG (already configured locally, `commit.gpgsign=true`).*
+*Resolved 2026-06-15: Docker and Podman are both first-class runtimes (Docker
+licensing makes Podman a required peer, not a fallback).*
