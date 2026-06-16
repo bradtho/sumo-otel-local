@@ -437,11 +437,19 @@ function use_existing_podman {
     done
 }
 
-function cleanup {
-    echo "Exiting Keyboard Interrupt or Error..."
-    uninstall
+# Report errors without destroying anything. Previously this trap ran the
+# interactive uninstall flow, so any failed command (with `set -e`) could delete
+# the user's cluster. Now it only reports the failure and exits non-zero; cluster
+# teardown is left to the explicit --uninstall / --purge options.
+function on_error {
+    local exit_code=$?
+    local line_no=${1:-unknown}
+    echo "" >&2
+    echo "Error: command failed (exit ${exit_code}) at line ${line_no}." >&2
+    echo "Nothing has been changed or removed. To tear down a cluster, re-run with -u/--uninstall or -p/--purge." >&2
+    exit "${exit_code}"
 }
-trap cleanup ERR
+trap 'on_error ${LINENO}' ERR
 
 # Parse Arguments
 while [[ $# -gt 0 ]]; do

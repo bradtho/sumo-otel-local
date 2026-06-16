@@ -29,9 +29,9 @@ These cause broken installs, surprise destruction, or secret exposure.
   detection; `kind`, `kubectl`, and `jq` downloads are now OS+arch aware. Podman's
   direct install branches: macOS keeps the release zip, Linux defers to the distro
   package manager (a static binary can't provide a working rootless setup).
-- [ ] **Remove / rework `trap cleanup ERR`** — `sumo-otel-local.sh:404-408`. With
-  `set -e`, *any* failed command triggers the interactive `uninstall` flow and can
-  delete the user's cluster. Replace with a safe handler that only reports the error.
+- [x] **Remove / rework `trap cleanup ERR`** — done. Replaced the `cleanup`→`uninstall`
+  trap with `on_error`, which reports the failing line + exit code, changes/removes
+  nothing, and exits non-zero. Cluster teardown is now only via explicit `-u`/`-p`.
 - [ ] **Fix `-i` install flow early `exit 0`** — `sumo-otel-local.sh:330-332,365,371`.
   Creating/selecting a Podman machine exits the whole script, so cluster creation and
   Sumo install never run during `--install`. Return instead of exiting.
