@@ -42,9 +42,11 @@ These cause broken installs, surprise destruction, or secret exposure.
   that removes it (also fires when the `ERR` trap exits on failure). A `yaml_escape`
   helper safely quotes the values. Only the non-secret `clusterName` stays on the CLI.
   Verified: no secret in helm argv, file is 0600, escaping round-trips, file removed.
-- [ ] **Cross-platform secret storage** — `security`/Keychain
-  (`sumo-otel-local.sh:117-129,222-234`) is macOS-only. Add a Linux path (e.g.
-  `secret-tool`/libsecret, or an env-var fallback) so the install/purge flows work there.
+- [x] **Cross-platform secret storage** — done. Added a `SECRET_BACKEND` selector
+  (macOS Keychain → Linux `secret-tool`/libsecret → env-var fallback) and
+  `secret_get`/`secret_set`/`secret_delete` helpers; `install_sumo` and `purge` now
+  route through them instead of calling `security` directly. Verified all three
+  backends with stubs (11/11) under bash 3.2.
 - [x] **Fix architecture mapping** — done as part of the OS/arch detection above:
   `x86_64`→`amd64`, `arm64`/`aarch64`→`arm64`, with an explicit error on anything else.
   Intel Macs no longer hit 404s.

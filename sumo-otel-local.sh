@@ -45,6 +45,16 @@ else
     JQ_OS="linux"
 fi
 
+# Choose a secret-storage backend: macOS Keychain, Linux libsecret (secret-tool),
+# or an environment-variable fallback when neither is available.
+if [[ "$OS" == "darwin" ]] && command -v security &> /dev/null; then
+    SECRET_BACKEND="keychain"
+elif command -v secret-tool &> /dev/null; then
+    SECRET_BACKEND="secret-tool"
+else
+    SECRET_BACKEND="env"
+fi
+
 # Check Dependencies
 function install_dependencies {
 
@@ -155,24 +165,70 @@ function yaml_escape {
     printf '%s' "$s"
 }
 
+# --- Cross-platform secret storage -------------------------------------------
+# Backends (selected above into SECRET_BACKEND): macOS Keychain, Linux libsecret
+# (secret-tool), or an env-var fallback (e.g. SUMOLOGIC_ACCESS_ID).
+
+# Map a secret name (e.g. sumologic_access_id) to its fallback env var name.
+function secret_env_var {
+    printf '%s' "$1" | tr '[:lower:]' '[:upper:]'
+}
+
+# Print a stored secret to stdout. Returns non-zero if it is not found.
+function secret_get {
+    local name=$1 var
+    case "$SECRET_BACKEND" in
+        keychain)    security find-generic-password -s "$name" -w 2>/dev/null ;;
+        secret-tool) secret-tool lookup service "$name" 2>/dev/null ;;
+        env)
+            var=$(secret_env_var "$name")
+            [[ -n "${!var:-}" ]] && printf '%s' "${!var}"
+            ;;
+    esac
+}
+
+# Store a secret for reuse on the next run.
+function secret_set {
+    local name=$1 value=$2 var
+    case "$SECRET_BACKEND" in
+        keychain)    security add-generic-password -a "$USER" -s "$name" -w "$value" ;;
+        secret-tool) printf '%s' "$value" | secret-tool store --label="$name" service "$name" ;;
+        env)
+            var=$(secret_env_var "$name")
+            echo "Note: no Keychain/secret-tool backend found; '$name' was not persisted." >&2
+            echo "      Export ${var} in your environment to avoid re-entering it next time." >&2
+            ;;
+    esac
+}
+
+# Delete a stored secret. Returns non-zero if it was not present.
+function secret_delete {
+    local name=$1
+    case "$SECRET_BACKEND" in
+        keychain)    security delete-generic-password -s "$name" > /dev/null 2>&1 ;;
+        secret-tool) secret-tool clear service "$name" 2>/dev/null ;;
+        env)         return 1 ;;
+    esac
+}
+
 function install_sumo {
 
     # Install Sumo Logic Operator
 
     ## Securely handle ACCESS_ID and ACCESS_KEY
 
-    if ! ACCESS_ID=$(security find-generic-password -s sumologic_access_id -w 2>/dev/null); then
-        echo "Sumo Logic Access ID not found in Keychain"
+    if ! ACCESS_ID=$(secret_get sumologic_access_id); then
+        echo "Sumo Logic Access ID not found in secret storage"
         read -rsp "Enter Sumo Logic Access ID: " ACCESS_ID
         echo ""
-        security add-generic-password -a "$USER" -s "sumologic_access_id" -w "$ACCESS_ID"
+        secret_set sumologic_access_id "$ACCESS_ID"
     fi
 
-    if ! ACCESS_KEY=$(security find-generic-password -s sumologic_access_key -w 2>/dev/null); then
-        echo "Sumo Logic Access Key not found in Keychain"
+    if ! ACCESS_KEY=$(secret_get sumologic_access_key); then
+        echo "Sumo Logic Access Key not found in secret storage"
         read -rsp "Enter Sumo Logic Access Key: " ACCESS_KEY
         echo ""
-        security add-generic-password -a "$USER" -s "sumologic_access_key" -w "$ACCESS_KEY"
+        secret_set sumologic_access_key "$ACCESS_KEY"
     fi
 
     DEFAULT_HELM_VALUES="values.yaml"
@@ -277,18 +333,16 @@ function purge {
         exit 0
     fi
 
-    if ! ACCESS_ID=$(security find-generic-password -s sumologic_access_id -w 2>/dev/null); then
-        echo "Sumo Logic Access ID not found in Keychain continuing to purge."
+    if secret_delete sumologic_access_id; then
+        echo "Removed 'sumologic_access_id' from secret storage."
     else
-        echo "Removing 'sumologic_access_id' from Keychain."
-        security delete-generic-password -s "sumologic_access_id"
+        echo "Sumo Logic Access ID not found in secret storage; continuing to purge."
     fi
 
-    if ! ACCESS_KEY=$(security find-generic-password -s sumologic_access_key -w 2>/dev/null); then
-        echo "Sumo Logic Access Key not found in Keychain continuing to purge."
+    if secret_delete sumologic_access_key; then
+        echo "Removed 'sumologic_access_key' from secret storage."
     else
-        echo "Removing 'sumologic_access_key' from Keychain."
-        security delete-generic-password -s "sumologic_access_key"
+        echo "Sumo Logic Access Key not found in secret storage; continuing to purge."
     fi
 }
 
