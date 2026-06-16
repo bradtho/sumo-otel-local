@@ -147,7 +147,15 @@ function init_cluster {
     fi   
 }
 
-function install_sumo {    
+# Escape a string for use as a double-quoted YAML scalar.
+function yaml_escape {
+    local s=$1
+    s=${s//\\/\\\\}   # escape backslashes first
+    s=${s//\"/\\\"}   # then double quotes
+    printf '%s' "$s"
+}
+
+function install_sumo {
 
     # Install Sumo Logic Operator
 
@@ -184,14 +192,25 @@ function install_sumo {
         echo "Skipping Update."
     fi
 
+    # Pass the credentials via a private temp values file instead of on the command
+    # line, where --set-string would expose them in the process list (ps/argv).
+    secrets_file=$(mktemp)
+    chmod 600 "$secrets_file"
+    # Remove the secrets file on exit, including when the ERR trap fires on failure.
+    trap 'rm -f "$secrets_file"' EXIT
+    cat > "$secrets_file" <<EOF
+sumologic:
+  accessId: "$(yaml_escape "$ACCESS_ID")"
+  accessKey: "$(yaml_escape "$ACCESS_KEY")"
+EOF
+
     helm upgrade \
     --install \
     sumologic sumologic/sumologic \
     --namespace=sumologic \
     --create-namespace \
     --values "${HELM_VALUES}" \
-    --set-string sumologic.accessId="${ACCESS_ID}" \
-    --set-string sumologic.accessKey="${ACCESS_KEY}" \
+    --values "${secrets_file}" \
     --set-string sumologic.clusterName="${CLUSTER_NAME}" \
     --set-string fullnameOverride=sumo \
     --set sumologic.falco.enabled=false \

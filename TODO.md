@@ -37,9 +37,11 @@ These cause broken installs, surprise destruction, or secret exposure.
   instead of calling `exit`. `init_cluster` checks the result and only aborts on
   failure, so a successful create/select continues to `kind create cluster` and
   `install_sumo`. Verified both paths with command stubs.
-- [ ] **Stop leaking secrets on the Helm CLI** — `sumo-otel-local.sh:154-155`.
-  `--set-string sumologic.accessId/accessKey` exposes credentials in the process list.
-  Write to a temp values file (mode 600) or feed via `--set-file`/stdin and shred after.
+- [x] **Stop leaking secrets on the Helm CLI** — done. Access ID/Key are now written
+  to a `mktemp` values file (`chmod 600`) passed via `--values`, with an `EXIT` trap
+  that removes it (also fires when the `ERR` trap exits on failure). A `yaml_escape`
+  helper safely quotes the values. Only the non-secret `clusterName` stays on the CLI.
+  Verified: no secret in helm argv, file is 0600, escaping round-trips, file removed.
 - [ ] **Cross-platform secret storage** — `security`/Keychain
   (`sumo-otel-local.sh:117-129,222-234`) is macOS-only. Add a Linux path (e.g.
   `secret-tool`/libsecret, or an env-var fallback) so the install/purge flows work there.
