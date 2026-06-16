@@ -390,7 +390,7 @@ function use_existing_podman {
     machines_json=$(podman machine list --format json)
 
     # Arrays to hold valid machines
-    declare -a valid_names valid_memories valid_cpus
+    declare -a valid_names valid_memories valid_cpus valid_statuses
 
     index=0
     echo "Checking Podman machines for minimum requirements (Memory ≥ ${MIN_MEM_MB}MB, CPUs ≥ ${MIN_CPU})..."

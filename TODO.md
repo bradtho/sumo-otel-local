@@ -57,8 +57,8 @@ These cause broken installs, surprise destruction, or secret exposure.
   `kind-config.yaml` so the script's `--name "${CLUSTER_NAME}"` (default `sumo`) is
   the single source of truth. Create, `uninstall`, and `purge` all use `CLUSTER_NAME`,
   so teardown targets the cluster that was created. YAML still parses (kind/apiVersion/nodes).
-- [ ] **Declare `valid_statuses`** — used at `sumo-otel-local.sh:302` but absent from the
-  `declare -a` at line 281; fragile under `set -u`.
+- [x] **Declare `valid_statuses`** — done. Added to the `declare -a` line alongside
+  the other valid-machine arrays so it is declared in lockstep under `set -u`.
 - [ ] **Pin / prompt Kubernetes version** — `init_cluster` always uses "latest"
   (`sumo-otel-local.sh:100-108`); the "choose a version" branch is a dead-end `echo`.
   Wire it to a real `--image kindest/node:<tag>` selection (see `local-image.sh`).
