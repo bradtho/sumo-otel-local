@@ -53,9 +53,10 @@ These cause broken installs, surprise destruction, or secret exposure.
 
 ## P1 — High (reliability / UX correctness)
 
-- [ ] **Resolve cluster-name conflict** — `kind-config.yaml` hardcodes `name: cluster`
-  while the script passes `--name ${CLUSTER_NAME}` (`sumo-otel-local.sh:105`). Decide
-  on one source of truth so `uninstall`/`purge` target the right cluster.
+- [x] **Resolve cluster-name conflict** — done. Removed `name: cluster` from
+  `kind-config.yaml` so the script's `--name "${CLUSTER_NAME}"` (default `sumo`) is
+  the single source of truth. Create, `uninstall`, and `purge` all use `CLUSTER_NAME`,
+  so teardown targets the cluster that was created. YAML still parses (kind/apiVersion/nodes).
 - [ ] **Declare `valid_statuses`** — used at `sumo-otel-local.sh:302` but absent from the
   `declare -a` at line 281; fragile under `set -u`.
 - [ ] **Pin / prompt Kubernetes version** — `init_cluster` always uses "latest"
