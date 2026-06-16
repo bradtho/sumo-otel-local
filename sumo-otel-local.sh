@@ -126,6 +126,55 @@ function install_dependencies {
     fi
 }
 
+# Prompt for a kindest/node image and echo the chosen ref (e.g.
+# kindest/node:v1.32.2) to stdout. All prompts/UI go to stderr so the result is
+# safe to capture with $(...). Echoes nothing if the user opts for kind's default.
+function select_node_image {
+    local url="https://hub.docker.com/v2/repositories/kindest/node/tags?page_size=100&ordering=last_updated"
+    local tags=() response tag i selection manual
+
+    echo "Fetching available kindest/node tags from Docker Hub..." >&2
+    if response=$(curl -fsSL "$url" 2>/dev/null); then
+        # Keep only semantic version tags (vMAJOR.MINOR.PATCH), newest first, de-duped.
+        while IFS= read -r tag; do
+            [[ -n "$tag" ]] && tags+=("$tag")
+        done < <(printf '%s' "$response" | jq -r '.results[].name' \
+                 | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | awk '!seen[$0]++')
+    fi
+
+    if [[ ${#tags[@]} -eq 0 ]]; then
+        echo "Could not fetch a tag list (offline or API change)." >&2
+        read -rp "Enter a kindest/node version tag (e.g. v1.32.2), blank for kind's default: " manual
+        [[ -n "$manual" ]] && printf 'kindest/node:%s' "$manual"
+        return 0
+    fi
+
+    echo "Available kindest/node versions:" >&2
+    for i in "${!tags[@]}"; do
+        printf "%3d. %s\n" "$((i + 1))" "${tags[$i]}" >&2
+    done
+    local manual_option=$(( ${#tags[@]} + 1 ))
+    printf "%3d. %s\n" "$manual_option" "Enter a tag manually" >&2
+
+    while true; do
+        read -rp "Select a version [1-${manual_option}]: " selection
+        if ! [[ "$selection" =~ ^[0-9]+$ ]]; then
+            echo "Please enter a number between 1 and ${manual_option}." >&2
+            continue
+        fi
+        if [[ "$selection" -eq "$manual_option" ]]; then
+            read -rp "Enter a kindest/node version tag (e.g. v1.32.2): " manual
+            [[ -n "$manual" ]] && { printf 'kindest/node:%s' "$manual"; return 0; }
+            continue
+        fi
+        if [[ "$selection" -ge 1 && "$selection" -le ${#tags[@]} ]]; then
+            printf 'kindest/node:%s' "${tags[$((selection - 1))]}"
+            return 0
+        fi
+        echo "Invalid selection: enter a number between 1 and ${manual_option}." >&2
+    done
+}
+
 function init_cluster {
     DEFAULT_CLUSTER_NAME="sumo"
 
@@ -146,15 +195,23 @@ function init_cluster {
         fi
     fi
 
-    read -rp "KinD will install the latest Kubernetes version is this OK? [y/n]" yn
+    # Cluster name is asked once, regardless of the version choice.
+    read -rp "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " CLUSTER_NAME
+    : "${CLUSTER_NAME:=${DEFAULT_CLUSTER_NAME}}"
+
+    read -rp "KinD will install the latest Kubernetes version, is this OK? [y/n]" yn
     if [[ $yn =~ ^[Yy]$ ]]; then
-        # Create a cluster
-        read -rp "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " CLUSTER_NAME
-        : "${CLUSTER_NAME:=${DEFAULT_CLUSTER_NAME}}"
         kind create cluster --name "${CLUSTER_NAME}" --config kind-config.yaml
     else
-        echo "Please select the version of Kubernetes you would like to run."
-    fi   
+        node_image=$(select_node_image)
+        if [[ -n "$node_image" ]]; then
+            echo "Creating cluster '${CLUSTER_NAME}' with ${node_image}..."
+            kind create cluster --name "${CLUSTER_NAME}" --config kind-config.yaml --image "${node_image}"
+        else
+            echo "No version selected; using KinD's default node image."
+            kind create cluster --name "${CLUSTER_NAME}" --config kind-config.yaml
+        fi
+    fi
 }
 
 # Escape a string for use as a double-quoted YAML scalar.

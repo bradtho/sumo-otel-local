@@ -59,9 +59,10 @@ These cause broken installs, surprise destruction, or secret exposure.
   so teardown targets the cluster that was created. YAML still parses (kind/apiVersion/nodes).
 - [x] **Declare `valid_statuses`** — done. Added to the `declare -a` line alongside
   the other valid-machine arrays so it is declared in lockstep under `set -u`.
-- [ ] **Pin / prompt Kubernetes version** — `init_cluster` always uses "latest"
-  (`sumo-otel-local.sh:100-108`); the "choose a version" branch is a dead-end `echo`.
-  Wire it to a real `--image kindest/node:<tag>` selection (see `local-image.sh`).
+- [x] **Pin / prompt Kubernetes version** — done. Added `select_node_image` (fetches
+  kindest/node tags from Docker Hub, filters to semver, newest-first, with manual-entry
+  and offline fallbacks). The "is latest OK?" → no branch now creates the cluster with
+  `--image kindest/node:<tag>`. Cluster name is asked once up front. Verified 6/6.
 - [ ] **Validate the Helm values path** before calling Helm (`:131-159`) — fail early
   with a clear message if the file doesn't exist.
 - [ ] **Make memory/CPU minimums configurable** — `MIN_MEM_MB=18432`, `MIN_CPU=4` are
@@ -102,9 +103,11 @@ prerequisite for *any* PR merge — treat as high priority alongside P0/P1.
 
 ## P2 — Medium (maintainability / cleanup)
 
-- [ ] **Wire up or remove `local-image.sh`** — the pull/load/tag logic is entirely
-  commented out (`local-image.sh:1-12`); the script only lists tags and does nothing
-  with the selection. Either integrate offline image loading or delete the file.
+- [ ] **Remove `local-image.sh`** — its tag-picker is now superseded by
+  `select_node_image` in the main script (live version selection wired into
+  `kind create --image`). The remaining unique idea is the *offline* pull/save/load
+  flow (all commented out). Either fold air-gapped image loading into the main script
+  or just delete the file; leaning delete.
 - [ ] **De-duplicate constants** — `DEFAULT_CLUSTER_NAME="sumo"` is redefined in five
   places; lift to a single top-level constant.
 - [ ] **Consolidate Podman-running checks** — the "is a machine already running / stop
