@@ -122,7 +122,10 @@ function init_cluster {
     # Initialise and Start Podman
     if command -v podman &> /dev/null; then
         echo "Podman is installed..."
-        use_existing_podman
+        if ! use_existing_podman; then
+            echo "Podman machine setup did not complete; aborting."
+            exit 1
+        fi
     else
         read -rp "Podman is not installed. Are you using Docker Desktop? [y/n]" yn
         if [[ $yn =~ ^[Yy]$ ]]; then
@@ -297,11 +300,11 @@ function new_podman {
             echo "Stopping '$running_machine'..."
             podman machine stop "$running_machine"
         else
-            echo "Cannot start new machine while another is running. Exiting."
-            exit 0
+            echo "Cannot start new machine while another is running."
+            return 1
         fi
-    fi    
-    
+    fi
+
     podman machine start "${NAME}"
 }
 
@@ -358,17 +361,16 @@ function use_existing_podman {
                     echo "Stopping '$running_machine'..."
                     podman machine stop "$running_machine"
                 else
-                    echo "Cannot proceed while another machine is running. Exiting."
-                    exit 1
+                    echo "Cannot proceed while another machine is running."
+                    return 1
                 fi
             fi
 
-            new_podman
-            
-            exit 0
+            new_podman || return 1
+            return 0
         else
-            echo "No machine selected and creation declined. Exiting."
-            exit 0
+            echo "No machine selected and creation declined."
+            return 1
         fi
     fi
 
@@ -397,14 +399,14 @@ function use_existing_podman {
 
         # Handle "Create a new machine"
         if [[ "$selection" -eq "$create_option" ]]; then
-            new_podman
-            exit 0
+            new_podman || return 1
+            return 0
         fi
 
         # Handle "None"
         if [[ "$selection" -eq "$exit_option" ]]; then
             echo "Exiting without selecting a Podman machine."
-            exit 0
+            return 1
         fi
 
         # Convert to 0-based index and validate
@@ -428,13 +430,15 @@ function use_existing_podman {
                 podman machine start "$chosen_machine"
             else
                 echo "Exiting without starting machine."
-                exit 0
+                return 1
             fi
         fi
         # Optional: Activate it
         # podman machine use "$chosen_machine"
         break
     done
+
+    return 0
 }
 
 # Report errors without destroying anything. Previously this trap ran the

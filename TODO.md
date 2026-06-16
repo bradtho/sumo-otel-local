@@ -32,9 +32,11 @@ These cause broken installs, surprise destruction, or secret exposure.
 - [x] **Remove / rework `trap cleanup ERR`** — done. Replaced the `cleanup`→`uninstall`
   trap with `on_error`, which reports the failing line + exit code, changes/removes
   nothing, and exits non-zero. Cluster teardown is now only via explicit `-u`/`-p`.
-- [ ] **Fix `-i` install flow early `exit 0`** — `sumo-otel-local.sh:330-332,365,371`.
-  Creating/selecting a Podman machine exits the whole script, so cluster creation and
-  Sumo install never run during `--install`. Return instead of exiting.
+- [x] **Fix `-i` install flow early `exit 0`** — done. `new_podman` and
+  `use_existing_podman` now `return` a status (0 = machine ready, 1 = user aborted)
+  instead of calling `exit`. `init_cluster` checks the result and only aborts on
+  failure, so a successful create/select continues to `kind create cluster` and
+  `install_sumo`. Verified both paths with command stubs.
 - [ ] **Stop leaking secrets on the Helm CLI** — `sumo-otel-local.sh:154-155`.
   `--set-string sumologic.accessId/accessKey` exposes credentials in the process list.
   Write to a temp values file (mode 600) or feed via `--set-file`/stdin and shred after.
