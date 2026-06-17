@@ -86,10 +86,12 @@ These cause broken installs, surprise destruction, or secret exposure.
 The `main` branch now requires passing status checks, so standing up CI is a
 prerequisite for *any* PR merge — treat as high priority alongside P0/P1.
 
-- [ ] **GitHub Actions CI workflow** — `.github/workflows/ci.yml` triggered on PRs and
-  pushes to `dev`. At minimum: `shellcheck` + `shfmt --diff` on `*.sh`, and a YAML lint
-  on `kind-config.yaml` / `values.yaml` / `examples/*.yaml`. Run on both macOS and Linux
-  runners to back the macOS+Linux support goal.
+- [x] **GitHub Actions CI workflow** — done. `.github/workflows/ci.yml` runs on PRs and
+  pushes to `dev`, on an Ubuntu + macOS matrix: `bash -n`, `shellcheck`, `shfmt -d -i 4
+  -ci` (pinned shfmt v3.13.1 on both runners), and `yamllint -c .yamllint.yml` over
+  `kind-config.yaml` / `values.yaml` / `examples/*.yaml`. Scripts were shfmt-formatted
+  and the YAML cleaned (trailing whitespace / final newlines) so the first run is green;
+  all four checks verified locally with the exact CI commands.
 - [ ] **Register the check as a required status check** on `main` once the workflow name
   is stable, so the branch-protection rule is actually enforced.
 - [ ] **Mock-deployment validation job** — in CI, stand up a KinD cluster (e.g.

@@ -4,7 +4,7 @@ sumologic:
       enabled: false
     monitors:
       enabled: false
-  metrics: 
+  metrics:
     collector:
       otelcol:
         scrapeInterval: 30s

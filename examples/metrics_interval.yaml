@@ -1,5 +1,5 @@
 sumologic:
-  metrics: 
+  metrics:
     collector:
       otelcol:
         scrapeInterval: 30s

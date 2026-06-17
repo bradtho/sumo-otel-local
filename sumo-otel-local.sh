@@ -16,12 +16,11 @@ function help {
     echo "  -v, --version   Display the version of the script."
 }
 
-
 # Detect OS and CPU architecture, normalized to the tokens used by release assets.
 OS_RAW=$(uname -s)
 case "$OS_RAW" in
     Darwin) OS="darwin" ;;
-    Linux)  OS="linux" ;;
+    Linux) OS="linux" ;;
     *)
         echo "Unsupported operating system: ${OS_RAW}. Only macOS (Darwin) and Linux are supported."
         exit 1
@@ -30,8 +29,8 @@ esac
 
 ARCH_RAW=$(uname -m)
 case "$ARCH_RAW" in
-    x86_64|amd64)  ARCH="amd64" ;;
-    arm64|aarch64) ARCH="arm64" ;;
+    x86_64 | amd64) ARCH="amd64" ;;
+    arm64 | aarch64) ARCH="arm64" ;;
     *)
         echo "Unsupported architecture: ${ARCH_RAW}. Only amd64 (x86_64) and arm64 (aarch64) are supported."
         exit 1
@@ -47,17 +46,17 @@ fi
 
 # Choose a secret-storage backend: macOS Keychain, Linux libsecret (secret-tool),
 # or an environment-variable fallback when neither is available.
-if [[ "$OS" == "darwin" ]] && command -v security &> /dev/null; then
+if [[ "$OS" == "darwin" ]] && command -v security &>/dev/null; then
     SECRET_BACKEND="keychain"
-elif command -v secret-tool &> /dev/null; then
+elif command -v secret-tool &>/dev/null; then
     SECRET_BACKEND="secret-tool"
 else
     SECRET_BACKEND="env"
 fi
 
 # Minimum Podman machine resources, overridable via the environment.
-MIN_MEM_MB="${MIN_MEM_MB:-18432}"   # minimum memory in MiB
-MIN_CPU="${MIN_CPU:-4}"             # minimum vCPUs
+MIN_MEM_MB="${MIN_MEM_MB:-18432}" # minimum memory in MiB
+MIN_CPU="${MIN_CPU:-4}"           # minimum vCPUs
 if ! [[ "$MIN_MEM_MB" =~ ^[0-9]+$ && "$MIN_CPU" =~ ^[0-9]+$ ]]; then
     echo "MIN_MEM_MB and MIN_CPU must be positive integers (got MIN_MEM_MB='${MIN_MEM_MB}', MIN_CPU='${MIN_CPU}')." >&2
     exit 1
@@ -70,10 +69,10 @@ CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-}"
 # Check Dependencies
 function install_dependencies {
 
-    if command -v brew &> /dev/null; then
+    if command -v brew &>/dev/null; then
         echo "Installing Dependencies with Homebrew..."
         brew install --quiet jq kubectl helm kind podman
-    elif ! command -v brew &> /dev/null; then
+    elif ! command -v brew &>/dev/null; then
         read -rp "Homebrew is not installed. Would you like to install it? [y/n]" yn
         if [[ $yn =~ ^[Yy]$ ]]; then
             curl -fsSL -o install_homebrew.sh https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
@@ -83,13 +82,13 @@ function install_dependencies {
             install_dependencies
         else
             echo "Installing Dependencies Directly..."
-            if ! command -v jq &> /dev/null; then
+            if ! command -v jq &>/dev/null; then
                 echo "Installing jq..."
                 curl -Lo /usr/local/bin/jq https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-${JQ_OS}-${ARCH}
                 chmod +x /usr/local/bin/jq
             fi
 
-            if ! command -v kubectl &> /dev/null; then
+            if ! command -v kubectl &>/dev/null; then
                 echo "Installing Kubectl..."
                 curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/${OS}/${ARCH}/kubectl"
                 chmod +x ./kubectl
@@ -98,14 +97,14 @@ function install_dependencies {
                 kubectl version --client
             fi
 
-            if ! command -v helm &> /dev/null; then
+            if ! command -v helm &>/dev/null; then
                 echo "Installing Helm..."
                 curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
                 chmod 700 get_helm.sh
                 ./get_helm.sh
             fi
 
-            if ! command -v docker &> /dev/null && ! command -v podman &> /dev/null; then
+            if ! command -v docker &>/dev/null && ! command -v podman &>/dev/null; then
                 echo "Installing Podman..."
                 if [[ "$OS" == "darwin" ]]; then
                     RELEASE=$(curl -L -s https://api.github.com/repos/containers/podman/releases/latest | jq -r .tag_name)
@@ -127,7 +126,7 @@ function install_dependencies {
                 fi
             fi
 
-            if ! command -v kind &> /dev/null; then
+            if ! command -v kind &>/dev/null; then
                 echo "Installing Kind..."
                 RELEASE=$(curl -L -s https://api.github.com/repos/kubernetes-sigs/kind/releases/latest | jq -r .tag_name)
                 curl -Lo ./kind "https://kind.sigs.k8s.io/dl/${RELEASE}/kind-${OS}-${ARCH}"
@@ -150,8 +149,8 @@ function select_node_image {
         # Keep only semantic version tags (vMAJOR.MINOR.PATCH), newest first, de-duped.
         while IFS= read -r tag; do
             [[ -n "$tag" ]] && tags+=("$tag")
-        done < <(printf '%s' "$response" | jq -r '.results[].name' \
-                 | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | awk '!seen[$0]++')
+        done < <(printf '%s' "$response" | jq -r '.results[].name' |
+            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | awk '!seen[$0]++')
     fi
 
     if [[ ${#tags[@]} -eq 0 ]]; then
@@ -165,7 +164,7 @@ function select_node_image {
     for i in "${!tags[@]}"; do
         printf "%3d. %s\n" "$((i + 1))" "${tags[$i]}" >&2
     done
-    local manual_option=$(( ${#tags[@]} + 1 ))
+    local manual_option=$((${#tags[@]} + 1))
     printf "%3d. %s\n" "$manual_option" "Enter a tag manually" >&2
 
     while true; do
@@ -176,7 +175,10 @@ function select_node_image {
         fi
         if [[ "$selection" -eq "$manual_option" ]]; then
             read -rp "Enter a kindest/node version tag (e.g. v1.32.2): " manual
-            [[ -n "$manual" ]] && { printf 'kindest/node:%s' "$manual"; return 0; }
+            [[ -n "$manual" ]] && {
+                printf 'kindest/node:%s' "$manual"
+                return 0
+            }
             continue
         fi
         if [[ "$selection" -ge 1 && "$selection" -le ${#tags[@]} ]]; then
@@ -193,13 +195,13 @@ function select_node_image {
 # installed; honors a preset CONTAINER_RUNTIME; returns non-zero if neither exists.
 function select_runtime {
     local has_podman="no" has_docker="no" choice
-    command -v podman &> /dev/null && has_podman="yes"
-    command -v docker &> /dev/null && has_docker="yes"
+    command -v podman &>/dev/null && has_podman="yes"
+    command -v docker &>/dev/null && has_docker="yes"
 
     # Honor an explicit override (env var or earlier selection) when it is available.
     if [[ -n "$CONTAINER_RUNTIME" ]]; then
-        if [[ "$CONTAINER_RUNTIME" == "podman" && "$has_podman" == "yes" ]] \
-        || [[ "$CONTAINER_RUNTIME" == "docker" && "$has_docker" == "yes" ]]; then
+        if [[ "$CONTAINER_RUNTIME" == "podman" && "$has_podman" == "yes" ]] ||
+            [[ "$CONTAINER_RUNTIME" == "docker" && "$has_docker" == "yes" ]]; then
             echo "Using container runtime: ${CONTAINER_RUNTIME}" >&2
             return 0
         fi
@@ -213,8 +215,14 @@ function select_runtime {
             read -rp "Which runtime should KinD use? [podman/docker] (default=podman): " choice
             choice="${choice:-podman}"
             case "$choice" in
-                [Pp]odman|PODMAN) CONTAINER_RUNTIME="podman"; break ;;
-                [Dd]ocker|DOCKER) CONTAINER_RUNTIME="docker"; break ;;
+                [Pp]odman | PODMAN)
+                    CONTAINER_RUNTIME="podman"
+                    break
+                    ;;
+                [Dd]ocker | DOCKER)
+                    CONTAINER_RUNTIME="docker"
+                    break
+                    ;;
                 *) echo "Please answer 'podman' or 'docker'." >&2 ;;
             esac
         done
@@ -259,7 +267,7 @@ function ensure_podman_ready {
     if [[ "$OS" == "darwin" ]]; then
         use_existing_podman
     else
-        if podman info &> /dev/null; then
+        if podman info &>/dev/null; then
             return 0
         fi
         echo "Podman is installed but not responding (podman info failed)." >&2
@@ -269,7 +277,7 @@ function ensure_podman_ready {
 
 # Ensure Docker is running, then report its resources.
 function ensure_docker_ready {
-    if ! docker info &> /dev/null; then
+    if ! docker info &>/dev/null; then
         echo "Docker is installed but not running. Start Docker and retry." >&2
         return 1
     fi
@@ -335,8 +343,8 @@ function require_values_file {
 # Escape a string for use as a double-quoted YAML scalar.
 function yaml_escape {
     local s=$1
-    s=${s//\\/\\\\}   # escape backslashes first
-    s=${s//\"/\\\"}   # then double quotes
+    s=${s//\\/\\\\} # escape backslashes first
+    s=${s//\"/\\\"} # then double quotes
     printf '%s' "$s"
 }
 
@@ -353,7 +361,7 @@ function secret_env_var {
 function secret_get {
     local name=$1 var
     case "$SECRET_BACKEND" in
-        keychain)    security find-generic-password -s "$name" -w 2>/dev/null ;;
+        keychain) security find-generic-password -s "$name" -w 2>/dev/null ;;
         secret-tool) secret-tool lookup service "$name" 2>/dev/null ;;
         env)
             var=$(secret_env_var "$name")
@@ -366,7 +374,7 @@ function secret_get {
 function secret_set {
     local name=$1 value=$2 var
     case "$SECRET_BACKEND" in
-        keychain)    security add-generic-password -a "$USER" -s "$name" -w "$value" ;;
+        keychain) security add-generic-password -a "$USER" -s "$name" -w "$value" ;;
         secret-tool) printf '%s' "$value" | secret-tool store --label="$name" service "$name" ;;
         env)
             var=$(secret_env_var "$name")
@@ -380,9 +388,9 @@ function secret_set {
 function secret_delete {
     local name=$1
     case "$SECRET_BACKEND" in
-        keychain)    security delete-generic-password -s "$name" > /dev/null 2>&1 ;;
+        keychain) security delete-generic-password -s "$name" >/dev/null 2>&1 ;;
         secret-tool) secret-tool clear service "$name" 2>/dev/null ;;
-        env)         return 1 ;;
+        env) return 1 ;;
     esac
 }
 
@@ -435,7 +443,7 @@ function install_sumo {
     chmod 600 "$secrets_file"
     # Remove the secrets file on exit, including when the ERR trap fires on failure.
     trap 'rm -f "$secrets_file"' EXIT
-    cat > "$secrets_file" <<EOF
+    cat >"$secrets_file" <<EOF
 sumologic:
   accessId: "$(yaml_escape "$ACCESS_ID")"
   accessKey: "$(yaml_escape "$ACCESS_KEY")"
@@ -560,7 +568,7 @@ function version {
 function new_podman {
     echo "Creating a new Podman machine..."
     DEFAULT_NAME="sumo"
-    DEFAULT_MEMORY="${MIN_MEM_MB}"   # default a new machine to the configured minimum
+    DEFAULT_MEMORY="${MIN_MEM_MB}" # default a new machine to the configured minimum
     read -rp "Allocate memory for Podman machine (in MiB) [default=${DEFAULT_MEMORY}]: " MEMORY
     read -rp "Name of the Podman machine [default=${DEFAULT_NAME}]: " NAME
     : "${MEMORY:=${DEFAULT_MEMORY}}"
@@ -601,12 +609,12 @@ function use_existing_podman {
     # Loop over machines using `jq` length and index
     machine_count=$(echo "$machines_json" | jq 'length')
 
-    for ((i=0; i<machine_count; i++)); do
+    for ((i = 0; i < machine_count; i++)); do
         name=$(echo "$machines_json" | jq -r ".[$i].Name")
         mem_bytes=$(echo "$machines_json" | jq -r ".[$i].Memory")
         cpu=$(echo "$machines_json" | jq -r ".[$i].CPUs")
         status=$(echo "$machines_json" | jq -r ".[$i].Running")
-        
+
         #Convert memory from bytes to MB
         mem_mb=$(awk "BEGIN { printf \"%d\", $mem_bytes / 1024 / 1024 }")
 
@@ -659,8 +667,8 @@ function use_existing_podman {
             echo "$display_number. ${valid_names[$i]} - Memory: ${valid_memories[$i]}MB, CPUs: ${valid_cpus[$i]}"
         done
 
-        create_option=$(( ${#valid_names[@]} + 1 ))
-        exit_option=$(( ${#valid_names[@]} + 2 ))
+        create_option=$((${#valid_names[@]} + 1))
+        exit_option=$((${#valid_names[@]} + 2))
 
         echo "$create_option. Create a new Podman machine"
         echo "$exit_option. None (exit)"
@@ -735,38 +743,38 @@ trap 'on_error ${LINENO}' ERR
 while [[ $# -gt 0 ]]; do
     key="$1"
     case $key in
-        -h|--help)
+        -h | --help)
             help
             exit 0
             ;;
-        -i|--install)
+        -i | --install)
             install_dependencies
             init_cluster
             install_sumo
             exit 0
             ;;
-        -n|--init)
+        -n | --init)
             install_dependencies
             init_cluster
             exit 0
             ;;
-        -m|--helm)
+        -m | --helm)
             install_sumo
             exit 0
             ;;
-        -o|--output)
+        -o | --output)
             output
             exit 0
             ;;
-        -p|--purge)
+        -p | --purge)
             purge
             exit 0
             ;;
-        -u|--uninstall)
+        -u | --uninstall)
             uninstall
             exit 0
             ;;
-        -v|--version)
+        -v | --version)
             version
             exit 0
             ;;

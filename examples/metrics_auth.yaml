@@ -7,7 +7,7 @@ sumologic:
       enabled: false
     monitors:
       enabled: false
-  metrics: 
+  metrics:
     collector:
       otelcol:
         scrapeInterval: 30s
@@ -23,7 +23,7 @@ sumologic:
             - default
         selector:
           matchLabels:
-            app: no-auth-metrics-service   
+            app: no-auth-metrics-service
 kube-prometheus-stack:
   prometheusOperator:
     enabled: true

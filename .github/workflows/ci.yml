@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck and yamllint (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck yamllint
+
+      - name: Install shellcheck and yamllint (macOS)
+        if: runner.os == 'macOS'
+        run: brew install shellcheck yamllint
+
+      - name: Install shfmt (pinned)
+        shell: bash
+        run: |
+          SHFMT_VERSION=v3.13.1
+          case "${{ runner.os }}-${{ runner.arch }}" in
+            Linux-X64)    asset=linux_amd64 ;;
+            Linux-ARM64)  asset=linux_arm64 ;;
+            macOS-ARM64)  asset=darwin_arm64 ;;
+            macOS-X64)    asset=darwin_amd64 ;;
+            *) echo "Unsupported runner: ${{ runner.os }}-${{ runner.arch }}"; exit 1 ;;
+          esac
+          curl -fsSL -o /tmp/shfmt \
+            "https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_${asset}"
+          chmod +x /tmp/shfmt
+          sudo mv /tmp/shfmt /usr/local/bin/shfmt
+
+      - name: Tool versions
+        run: |
+          shellcheck --version
+          shfmt --version
+          yamllint --version
+
+      - name: Bash syntax (bash -n)
+        run: |
+          for f in ./*.sh; do
+            bash -n "$f"
+          done
+
+      - name: shellcheck
+        run: shellcheck ./*.sh
+
+      - name: shfmt (diff)
+        run: shfmt -d -i 4 -ci ./*.sh
+
+      - name: yamllint
+        run: yamllint -c .yamllint.yml kind-config.yaml values.yaml examples/*.yaml
