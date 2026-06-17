@@ -55,6 +55,14 @@ else
     SECRET_BACKEND="env"
 fi
 
+# Minimum Podman machine resources, overridable via the environment.
+MIN_MEM_MB="${MIN_MEM_MB:-18432}"   # minimum memory in MiB
+MIN_CPU="${MIN_CPU:-4}"             # minimum vCPUs
+if ! [[ "$MIN_MEM_MB" =~ ^[0-9]+$ && "$MIN_CPU" =~ ^[0-9]+$ ]]; then
+    echo "MIN_MEM_MB and MIN_CPU must be positive integers (got MIN_MEM_MB='${MIN_MEM_MB}', MIN_CPU='${MIN_CPU}')." >&2
+    exit 1
+fi
+
 # Check Dependencies
 function install_dependencies {
 
@@ -434,9 +442,9 @@ function version {
 
 ## Helper Functions
 function new_podman {
-    echo "Creating a new Podman machine..."   
+    echo "Creating a new Podman machine..."
     DEFAULT_NAME="sumo"
-    DEFAULT_MEMORY=18432
+    DEFAULT_MEMORY="${MIN_MEM_MB}"   # default a new machine to the configured minimum
     read -rp "Allocate memory for Podman machine (in MiB) [default=${DEFAULT_MEMORY}]: " MEMORY
     read -rp "Name of the Podman machine [default=${DEFAULT_NAME}]: " NAME
     : "${MEMORY:=${DEFAULT_MEMORY}}"
@@ -463,9 +471,7 @@ function new_podman {
 }
 
 function use_existing_podman {
-    # Minimum requirements
-    MIN_MEM_MB=18432  # in MB
-    MIN_CPU=4
+    # Minimum requirements come from MIN_MEM_MB / MIN_CPU (set/overridable above).
 
     # Get list of all machines with their specs
     machines_json=$(podman machine list --format json)

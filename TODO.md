@@ -68,8 +68,10 @@ These cause broken installs, surprise destruction, or secret exposure.
   must exist (`require_values_file` fails early with a clear message); blank falls back
   to `values.yaml` only if present, else is skipped. `install_sumo`/`output` build helm
   args in an array and only add `--values`/`-f` when a file is in use. Verified 6/6.
-- [ ] **Make memory/CPU minimums configurable** — `MIN_MEM_MB=18432`, `MIN_CPU=4` are
-  hardcoded (`sumo-otel-local.sh:274-275`); allow override via flag/env.
+- [x] **Make memory/CPU minimums configurable** — done. `MIN_MEM_MB` (18432) and
+  `MIN_CPU` (4) are now set once at the top via `${VAR:-default}` so they can be
+  overridden by environment, with a positive-integer guard. `new_podman` also defaults
+  a new machine's memory to `MIN_MEM_MB`. Verified defaults, override, and invalid input.
 - [ ] **Treat Docker and Podman as first-class runtimes** — today `init_cluster`
   centers on Podman and only asks a yes/no "Are you using Docker Desktop?"
   (`sumo-otel-local.sh:83-98`), while the Podman machine/resource logic
