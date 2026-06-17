@@ -63,8 +63,11 @@ These cause broken installs, surprise destruction, or secret exposure.
   kindest/node tags from Docker Hub, filters to semver, newest-first, with manual-entry
   and offline fallbacks). The "is latest OK?" → no branch now creates the cluster with
   `--image kindest/node:<tag>`. Cluster name is asked once up front. Verified 6/6.
-- [ ] **Validate the Helm values path** before calling Helm (`:131-159`) — fail early
-  with a clear message if the file doesn't exist.
+- [x] **Validate the Helm values path** before calling Helm — done, treating the user
+  values file as *optional* (the chart can install with `--set` alone). A named file
+  must exist (`require_values_file` fails early with a clear message); blank falls back
+  to `values.yaml` only if present, else is skipped. `install_sumo`/`output` build helm
+  args in an array and only add `--values`/`-f` when a file is in use. Verified 6/6.
 - [ ] **Make memory/CPU minimums configurable** — `MIN_MEM_MB=18432`, `MIN_CPU=4` are
   hardcoded (`sumo-otel-local.sh:274-275`); allow override via flag/env.
 - [ ] **Treat Docker and Podman as first-class runtimes** — today `init_cluster`

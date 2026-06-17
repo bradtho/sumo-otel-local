@@ -214,6 +214,20 @@ function init_cluster {
     fi
 }
 
+# Fail early with a clear message if a Helm values file is missing or unreadable.
+function require_values_file {
+    local f=$1
+    if [[ ! -f "$f" ]]; then
+        echo "Error: Helm values file not found: '${f}'" >&2
+        echo "Provide a valid path, e.g. values.yaml or examples/metrics_interval.yaml" >&2
+        exit 1
+    fi
+    if [[ ! -r "$f" ]]; then
+        echo "Error: Helm values file is not readable: '${f}'" >&2
+        exit 1
+    fi
+}
+
 # Escape a string for use as a double-quoted YAML scalar.
 function yaml_escape {
     local s=$1
@@ -289,9 +303,15 @@ function install_sumo {
     fi
 
     DEFAULT_HELM_VALUES="values.yaml"
-    echo "Additional example values can be found in the examples folder. When prompted, please provide the path to the values.yaml file. e.g. examples/values.yaml"
-    read -rp "Name and Location of the Helm Values file. [default=values.yaml]: " HELM_VALUES
-    : "${HELM_VALUES:=${DEFAULT_HELM_VALUES}}"
+    echo "A Helm values file is optional; the chart can install with --set values alone."
+    echo "Example values live in the examples folder, e.g. examples/metrics_interval.yaml"
+    read -rp "Path to a Helm values file (blank to skip) [default if present=${DEFAULT_HELM_VALUES}]: " HELM_VALUES
+    # Blank falls back to the default file only when it actually exists.
+    if [[ -z "$HELM_VALUES" && -f "$DEFAULT_HELM_VALUES" ]]; then
+        HELM_VALUES="$DEFAULT_HELM_VALUES"
+    fi
+    # A values file is optional, but if one is named it must exist.
+    [[ -n "$HELM_VALUES" ]] && require_values_file "$HELM_VALUES"
 
     DEFAULT_CLUSTER_NAME="sumo"
     read -rp "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " CLUSTER_NAME
@@ -317,33 +337,37 @@ sumologic:
   accessKey: "$(yaml_escape "$ACCESS_KEY")"
 EOF
 
-    helm upgrade \
-    --install \
-    sumologic sumologic/sumologic \
-    --namespace=sumologic \
-    --create-namespace \
-    --values "${HELM_VALUES}" \
-    --values "${secrets_file}" \
-    --set-string sumologic.clusterName="${CLUSTER_NAME}" \
-    --set-string fullnameOverride=sumo \
-    --set sumologic.falco.enabled=false \
-    --set sumologic.logs.systemd.enabled=false
+    # Build the helm args; only include the user values file when one is in use.
+    local helm_args=(upgrade --install sumologic sumologic/sumologic
+        --namespace=sumologic --create-namespace)
+    [[ -n "$HELM_VALUES" ]] && helm_args+=(--values "$HELM_VALUES")
+    helm_args+=(--values "$secrets_file")
+    helm_args+=(--set-string "sumologic.clusterName=${CLUSTER_NAME}")
+    helm_args+=(--set-string fullnameOverride=sumo)
+    helm_args+=(--set sumologic.falco.enabled=false)
+    helm_args+=(--set sumologic.logs.systemd.enabled=false)
+
+    helm "${helm_args[@]}"
 }
 
 function output {
     DEFAULT_HELM_VALUES="values.yaml"
     DEFAULT_K8S_YAML="sumologic-rendered.yaml"
 
-    read -rp "Name and Location of the Helm Values file. [default=values.yaml]: " HELM_VALUES
-    : "${HELM_VALUES:=${DEFAULT_HELM_VALUES}}"
+    read -rp "Path to a Helm values file (blank to skip) [default if present=${DEFAULT_HELM_VALUES}]: " HELM_VALUES
+    if [[ -z "$HELM_VALUES" && -f "$DEFAULT_HELM_VALUES" ]]; then
+        HELM_VALUES="$DEFAULT_HELM_VALUES"
+    fi
+    [[ -n "$HELM_VALUES" ]] && require_values_file "$HELM_VALUES"
     read -rp "Name and Location of the rendered Kubernetes Manifest YAML file. [default=sumologic-rendered.yaml]: " K8S_YAML
-    : "${K8S_YAML:=${DEFAULT_K8S_YAML}}"   
- 
-    helm template \
-    --namespace=sumologic \
-    --create-namespace \
-    -f "${HELM_VALUES}" \
-    sumologic sumologic/sumologic | tee "${K8S_YAML}"
+    : "${K8S_YAML:=${DEFAULT_K8S_YAML}}"
+
+    # Only pass -f when a values file is in use; the chart renders with defaults otherwise.
+    local template_args=(template --namespace=sumologic --create-namespace)
+    [[ -n "$HELM_VALUES" ]] && template_args+=(-f "$HELM_VALUES")
+    template_args+=(sumologic sumologic/sumologic)
+
+    helm "${template_args[@]}" | tee "${K8S_YAML}"
 }
 
 function uninstall {
