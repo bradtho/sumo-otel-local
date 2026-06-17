@@ -20,10 +20,6 @@ at the current Bash implementation.
 
 ## P2 — Medium (reliability / maintainability)
 
-- [ ] **De-duplicate constants** — `DEFAULT_CLUSTER_NAME="sumo"` is redefined in several
-  places; lift to a single top-level constant (alongside `MIN_MEM_MB`/`MIN_CPU`).
-- [ ] **Consolidate Podman-running checks** — the "a machine is already running / stop
-  it?" logic is duplicated across `new_podman` and `use_existing_podman`.
 - [ ] **Consistent confirmation prompts** — mix of `[y/n]`, `[y/N]`, and case handling;
   standardize a `confirm()` helper.
 - [ ] **Add a `--non-interactive` / env-driven mode** so the script can run unattended
@@ -103,6 +99,11 @@ at the current Bash implementation.
 
 ### P2 — Medium (complete)
 
+- [x] De-duplicated `DEFAULT_CLUSTER_NAME` — lifted to a single top-level constant
+  (with `VERSION`/`MIN_*`); removed the four inline `="sumo"` assignments.
+- [x] Consolidated the Podman "a machine is already running / stop it?" logic into a
+  single `stop_running_machine` helper owned by `new_podman` (called before init/start);
+  removed the duplicate block from `use_existing_podman`. Verified (10/10).
 - [x] Removed `local-image.sh` — its tag picker was superseded by `select_node_image`,
   and the only unique bit (a commented-out offline pull/save/load flow) wasn't wired up.
   Deleted; no references remained.

@@ -73,6 +73,9 @@ SUMO_HELM_REPO_URL="https://sumologic.github.io/sumologic-kubernetes-collection"
 # automation bumps this); printed by -v/--version without any network calls.
 VERSION="0.4.0"
 
+# Default KinD cluster name, used by create and teardown.
+DEFAULT_CLUSTER_NAME="sumo"
+
 # Verify required commands exist; exit with clear guidance if any are missing.
 # Used by the flows that don't run install_dependencies (-m/-o/-u/-p).
 function require_cmd {
@@ -349,8 +352,6 @@ function cluster_exists {
 }
 
 function init_cluster {
-    DEFAULT_CLUSTER_NAME="sumo"
-
     # Choose and prepare the container runtime (Podman or Docker, both first-class).
     if ! select_runtime; then
         exit 1
@@ -519,7 +520,6 @@ function install_sumo {
     # A values file is optional, but if one is named it must exist.
     [[ -n "$HELM_VALUES" ]] && require_values_file "$HELM_VALUES"
 
-    DEFAULT_CLUSTER_NAME="sumo"
     read -rp "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " CLUSTER_NAME
     : "${CLUSTER_NAME:=${DEFAULT_CLUSTER_NAME}}"
 
@@ -590,7 +590,6 @@ function uninstall {
     echo "Caution: This will delete the cluster"
     read -rp "Are you sure you want to continue? [y/n]" yn
     if [[ $yn =~ ^[Yy]$ ]]; then
-        DEFAULT_CLUSTER_NAME="sumo"
         read -rp "Type the name of the cluster (Default: sumo) to continue. Type [exit] to cancel: " CLUSTER_NAME
         : "${CLUSTER_NAME:=${DEFAULT_CLUSTER_NAME}}"
         if [[ $CLUSTER_NAME == "exit" ]]; then
@@ -628,7 +627,6 @@ function purge {
 
     read -rp "Are you sure you want to continue? [y/n]" yn
     if [[ $yn =~ ^[Yy]$ ]]; then
-        DEFAULT_CLUSTER_NAME="sumo"
         read -rp "Type the name of the cluster (Default: sumo) to continue. Type [exit] to cancel: " CLUSTER_NAME
         : "${CLUSTER_NAME:=${DEFAULT_CLUSTER_NAME}}"
         if [[ $CLUSTER_NAME == "exit" ]]; then
@@ -683,6 +681,23 @@ function mem_to_mib {
     fi
 }
 
+# Only one Podman machine can run at a time. If one is running, offer to stop it.
+# Returns 0 if nothing is running or it was stopped, 1 if the user declines.
+function stop_running_machine {
+    local running_machine stop_choice
+    running_machine=$(podman machine list --format json | jq -r '.[] | select(.Running == true) | .Name')
+    [[ -z "$running_machine" ]] && return 0
+    echo "Podman machine '$running_machine' is currently running (only one can run at a time)."
+    read -rp "Stop it before continuing? [y/N]: " stop_choice
+    if [[ "$stop_choice" =~ ^[Yy]$ ]]; then
+        echo "Stopping '$running_machine'..."
+        podman machine stop "$running_machine"
+        return 0
+    fi
+    echo "Cannot proceed while another machine is running."
+    return 1
+}
+
 function new_podman {
     echo "Creating a new Podman machine..."
     DEFAULT_NAME="sumo"
@@ -692,23 +707,11 @@ function new_podman {
     : "${MEMORY:=${DEFAULT_MEMORY}}"
     : "${NAME:=${DEFAULT_NAME}}"
 
+    # Free the single run slot before creating/starting the new machine.
+    stop_running_machine || return 1
+
     echo "Initializing Podman machine '$NAME' with ${MEMORY}MiB RAM..."
     podman machine init --memory "${MEMORY}" "${NAME}"
-
-    running_machine=$(podman machine list --format json | jq -r '.[] | select(.Running == true) | .Name')
-    if [[ -n "$running_machine" ]]; then
-        echo "Podman machine '$running_machine' is currently running."
-        echo "Only one Podman machine can run at a time"
-        read -rp "Would you like to stop it before starting the new one? [y/N]: " stop_choice
-        if [[ "$stop_choice" =~ ^[Yy]$ ]]; then
-            echo "Stopping '$running_machine'..."
-            podman machine stop "$running_machine"
-        else
-            echo "Cannot start new machine while another is running."
-            return 1
-        fi
-    fi
-
     podman machine start "${NAME}"
 }
 
@@ -752,22 +755,7 @@ function use_existing_podman {
         read -rp "Would you like to create a new Podman machine with the correct specs? [y/N]: " create_choice
 
         if [[ "$create_choice" =~ ^[Yy]$ ]]; then
-            # Check if any Podman machine is currently running
-            running_machine=$(echo "$machines_json" | jq -r '.[] | select(.Running == true) | .Name')
-
-            if [[ -n "$running_machine" ]]; then
-                echo "⚠️  Podman machine '$running_machine' is currently running."
-                read -rp "Would you like to stop it before creating a new one? [y/N]: " stop_choice
-
-                if [[ "$stop_choice" =~ ^[Yy]$ ]]; then
-                    echo "Stopping '$running_machine'..."
-                    podman machine stop "$running_machine"
-                else
-                    echo "Cannot proceed while another machine is running."
-                    return 1
-                fi
-            fi
-
+            # new_podman stops any running machine before starting the new one.
             new_podman || return 1
             return 0
         else
