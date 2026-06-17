@@ -20,10 +20,6 @@ at the current Bash implementation.
 
 ## P2 — Medium (reliability / maintainability)
 
-- [ ] **Pre-flight dependency check for `-m`/`-o`/`-u`/`-p`** — only `-i`/`-n` run
-  `install_dependencies`; the other flags call `helm`/`kind`/`jq` directly and fail
-  cryptically (via the ERR trap) if a tool is missing. Add a `require_cmd` check at the
-  start of those flows with a clear "install X / run -n first" message.
 - [ ] **Offline `version()`** — `-v` makes a live GitHub API call
   (`sumo-otel-local.sh` `version`), so it's slow and fails offline. Embed a `VERSION`
   constant (kept in sync by release automation) and print that instead.
@@ -119,6 +115,11 @@ at the current Bash implementation.
 
 ### P2 — Medium (complete)
 
+- [x] Pre-flight dependency check — added `require_cmd` and called it at the start of the
+  flows that skip `install_dependencies`: `install_sumo`/`output` require `helm`,
+  `uninstall`/`purge` require `kind` (purge's Podman-machine branch also requires `jq`).
+  Missing tools now fail fast with "install X / run -n first" instead of a cryptic ERR
+  trap. Verified all four flows fail fast (4/4).
 - [x] Hardened `install_dependencies` — added `install_bin_dir` (prefers a writable
   on-PATH dir, falls back to `/usr/local/bin` with `sudo` only when needed, warns if not
   on PATH) and `install_binary`; direct installs download to `/tmp` then route through it.

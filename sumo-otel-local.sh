@@ -69,6 +69,20 @@ CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-}"
 # Helm repository for the Sumo Logic collection.
 SUMO_HELM_REPO_URL="https://sumologic.github.io/sumologic-kubernetes-collection"
 
+# Verify required commands exist; exit with clear guidance if any are missing.
+# Used by the flows that don't run install_dependencies (-m/-o/-u/-p).
+function require_cmd {
+    local missing=() c
+    for c in "$@"; do
+        command -v "$c" &>/dev/null || missing+=("$c")
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo "Error: required command(s) not found: ${missing[*]}" >&2
+        echo "Install them, or run '$0 -n' to install dependencies first." >&2
+        exit 1
+    fi
+}
+
 # Pick a directory for direct binary installs: prefer a writable dir already on
 # PATH; otherwise fall back to /usr/local/bin (written via sudo).
 function install_bin_dir {
@@ -445,6 +459,7 @@ function secret_delete {
 }
 
 function install_sumo {
+    require_cmd helm
 
     # Install Sumo Logic Operator
 
@@ -514,6 +529,7 @@ EOF
 }
 
 function output {
+    require_cmd helm
     DEFAULT_HELM_VALUES="values.yaml"
     DEFAULT_K8S_YAML="sumologic-rendered.yaml"
 
@@ -537,6 +553,7 @@ function output {
 }
 
 function uninstall {
+    require_cmd kind
     # Match KinD to the runtime that backs the cluster so it can find/delete it.
     if ! select_runtime; then exit 1; fi
     set_kind_provider
@@ -564,6 +581,7 @@ function uninstall {
 }
 
 function purge {
+    require_cmd kind
     if ! select_runtime; then exit 1; fi
     set_kind_provider
 
@@ -571,6 +589,7 @@ function purge {
     # Podman) there is no machine to remove.
     local has_machine="no" running_machine=""
     if [[ "$CONTAINER_RUNTIME" == "podman" && "$OS" == "darwin" ]]; then
+        require_cmd jq
         has_machine="yes"
         running_machine=$(podman machine list --format json | jq -r '.[] | select(.Running == true) | .Name')
         echo "Caution: This will delete the cluster and remove the - ${running_machine} - Podman machine!"
