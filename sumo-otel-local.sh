@@ -666,6 +666,23 @@ function version {
 }
 
 ## Helper Functions
+
+# Normalize a `podman machine` Memory value to MiB. Podman has reported this field
+# in bytes (5.x) and in MiB (older versions); decide by magnitude. Any real machine
+# has >= 1 GiB, so a value at/above 1 GiB-in-bytes is bytes, otherwise it's MiB.
+function mem_to_mib {
+    local raw=$1
+    [[ "$raw" =~ ^[0-9]+$ ]] || {
+        echo 0
+        return 0
+    }
+    if [[ "$raw" -ge 1073741824 ]]; then
+        echo $((raw / 1024 / 1024))
+    else
+        echo "$raw"
+    fi
+}
+
 function new_podman {
     echo "Creating a new Podman machine..."
     DEFAULT_NAME="sumo"
@@ -712,12 +729,12 @@ function use_existing_podman {
 
     for ((i = 0; i < machine_count; i++)); do
         name=$(echo "$machines_json" | jq -r ".[$i].Name")
-        mem_bytes=$(echo "$machines_json" | jq -r ".[$i].Memory")
+        mem_raw=$(echo "$machines_json" | jq -r ".[$i].Memory")
         cpu=$(echo "$machines_json" | jq -r ".[$i].CPUs")
         status=$(echo "$machines_json" | jq -r ".[$i].Running")
 
-        #Convert memory from bytes to MB
-        mem_mb=$(awk "BEGIN { printf \"%d\", $mem_bytes / 1024 / 1024 }")
+        # Normalize Memory to MiB (podman reports bytes on 5.x, MiB on older versions).
+        mem_mb=$(mem_to_mib "$mem_raw")
 
         if [[ "$mem_mb" -ge "$MIN_MEM_MB" && "$cpu" -ge "$MIN_CPU" ]]; then
             valid_names[index]="$name"

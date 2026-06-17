@@ -20,9 +20,6 @@ at the current Bash implementation.
 
 ## P2 — Medium (reliability / maintainability)
 
-- [ ] **Verify `podman machine` `Memory` units across versions** — `use_existing_podman`
-  (`:~495`) divides `Memory` by 1024/1024 assuming bytes; some Podman versions report
-  MiB. Confirm the unit (or normalize) so the resource check isn't off by 1024x.
 - [ ] **Remove `local-image.sh`** — superseded by `select_node_image`. The only unique
   idea left is the commented-out offline pull/save/load (air-gapped) flow; fold that into
   the main script or delete the file (leaning delete).
@@ -109,6 +106,10 @@ at the current Bash implementation.
 
 ### P2 — Medium (complete)
 
+- [x] Normalize `podman machine` `Memory` units — confirmed podman 5.x reports bytes
+  (`"19327352832"` = 18432 MiB); older versions reported MiB. Added a magnitude-based
+  `mem_to_mib` helper (≥ 1 GiB-in-bytes → bytes, else already MiB) so the resource check
+  isn't off by 1024×. Verified both unit conventions + boundary/non-numeric (6/6).
 - [x] Guard `kind create cluster` when the cluster already exists — `cluster_exists`
   (via `kind get clusters`) detects a same-named cluster and `init_cluster` offers
   reuse / recreate (delete + create) / cancel instead of letting kind emit a raw error.
