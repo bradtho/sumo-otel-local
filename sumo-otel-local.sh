@@ -343,6 +343,11 @@ function ensure_docker_ready {
     return 0
 }
 
+# True if a KinD cluster with the given name already exists (for the current provider).
+function cluster_exists {
+    kind get clusters 2>/dev/null | grep -Fxq "$1"
+}
+
 function init_cluster {
     DEFAULT_CLUSTER_NAME="sumo"
 
@@ -367,6 +372,26 @@ function init_cluster {
     # Cluster name is asked once, regardless of the version choice.
     read -rp "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " CLUSTER_NAME
     : "${CLUSTER_NAME:=${DEFAULT_CLUSTER_NAME}}"
+
+    # Handle an existing cluster of the same name instead of letting kind error out.
+    if cluster_exists "$CLUSTER_NAME"; then
+        echo "A KinD cluster named '${CLUSTER_NAME}' already exists."
+        read -rp "Reuse it (r), recreate it [delete + create] (d), or cancel (c)? [r/d/c]: " choice
+        case "$choice" in
+            [Rr]*)
+                echo "Reusing existing cluster '${CLUSTER_NAME}'."
+                return 0
+                ;;
+            [Dd]*)
+                echo "Deleting existing cluster '${CLUSTER_NAME}'..."
+                kind delete cluster --name "${CLUSTER_NAME}"
+                ;;
+            *)
+                echo "Cancelling; leaving the existing cluster in place."
+                exit 0
+                ;;
+        esac
+    fi
 
     read -rp "KinD will install the latest Kubernetes version, is this OK? [y/n]" yn
     if [[ $yn =~ ^[Yy]$ ]]; then

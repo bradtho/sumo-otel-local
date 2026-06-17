@@ -20,9 +20,6 @@ at the current Bash implementation.
 
 ## P2 — Medium (reliability / maintainability)
 
-- [ ] **Guard `kind create cluster` when the cluster already exists** — `init_cluster`
-  (`:316,321,324`) lets `kind` emit a raw "already exists" error. Detect via
-  `kind get clusters` and offer to reuse or recreate.
 - [ ] **Verify `podman machine` `Memory` units across versions** — `use_existing_podman`
   (`:~495`) divides `Memory` by 1024/1024 assuming bytes; some Podman versions report
   MiB. Confirm the unit (or normalize) so the resource check isn't off by 1024x.
@@ -112,6 +109,10 @@ at the current Bash implementation.
 
 ### P2 — Medium (complete)
 
+- [x] Guard `kind create cluster` when the cluster already exists — `cluster_exists`
+  (via `kind get clusters`) detects a same-named cluster and `init_cluster` offers
+  reuse / recreate (delete + create) / cancel instead of letting kind emit a raw error.
+  Verified all branches with stubs (8/8).
 - [x] Offline `version()` — `-v` now prints an embedded `VERSION` constant (`0.4.0`)
   instead of querying the GitHub API; no network/`jq`/`curl`. Release automation will
   keep the constant in sync.
