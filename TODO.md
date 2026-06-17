@@ -18,16 +18,6 @@ at the current Bash implementation.
 
 ---
 
-## P1 — High (reliability / UX correctness)
-
-- [ ] **Ensure the `sumologic` Helm repo is added before use** — `output` (`-o`) never
-  runs `helm repo add`, and `install_sumo`'s repo step is gated behind the "check for
-  updates?" prompt (`sumo-otel-local.sh:432-438`). If the repo was never added,
-  `helm template`/`upgrade ... sumologic/sumologic` fails with "repo not found". Add the
-  repo unconditionally (idempotent) before any `helm template`/`upgrade`, and make the
-  prompt about *updating* only. Factor into an `ensure_helm_repo` helper used by both
-  `install_sumo` and `output`.
-
 ## P2 — Medium (reliability / maintainability)
 
 - [ ] **Pre-flight dependency check for `-m`/`-o`/`-u`/`-p`** — only `-i`/`-n` run
@@ -116,6 +106,10 @@ at the current Bash implementation.
 
 ### P1 — High (all complete)
 
+- [x] Ensure the `sumologic` Helm repo is registered before any `helm template`/`upgrade`
+  — added an `ensure_helm_repo` helper (idempotent `helm repo add --force-update`, with
+  an optional index update) used by both `install_sumo` and `output`; the prompt now only
+  controls refreshing the index. Verified all paths add the repo (6/6).
 - [x] Resolved the cluster-name conflict (dropped `name:` from `kind-config.yaml`;
   `--name` is the single source of truth).
 - [x] Declared `valid_statuses` alongside the other valid-machine arrays.

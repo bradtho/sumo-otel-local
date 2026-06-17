@@ -66,6 +66,9 @@ fi
 # the interactive prompt (e.g. CONTAINER_RUNTIME=docker); select_runtime fills it in.
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-}"
 
+# Helm repository for the Sumo Logic collection.
+SUMO_HELM_REPO_URL="https://sumologic.github.io/sumologic-kubernetes-collection"
+
 # Check Dependencies
 function install_dependencies {
 
@@ -340,6 +343,17 @@ function require_values_file {
     fi
 }
 
+# Ensure the sumologic Helm repo is registered before any template/upgrade.
+# `helm repo add --force-update` is idempotent (adds it, or updates the URL if it
+# changed). Pass "update" to also refresh the repo index.
+function ensure_helm_repo {
+    helm repo add sumologic "$SUMO_HELM_REPO_URL" --force-update >/dev/null
+    if [[ "${1:-}" == "update" ]]; then
+        echo "Updating Helm repo 'sumologic'..."
+        helm repo update sumologic
+    fi
+}
+
 # Escape a string for use as a double-quoted YAML scalar.
 function yaml_escape {
     local s=$1
@@ -429,12 +443,13 @@ function install_sumo {
     read -rp "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " CLUSTER_NAME
     : "${CLUSTER_NAME:=${DEFAULT_CLUSTER_NAME}}"
 
-    read -rp "Do you want to check for Helm Repo Updates? [y/n]" yn
+    # Always ensure the repo is registered; the prompt only controls refreshing it.
+    read -rp "Check for Helm repo updates? [y/n]" yn
     if [[ $yn =~ ^[Yy]$ ]]; then
-        helm repo add sumologic https://sumologic.github.io/sumologic-kubernetes-collection
-        helm repo update sumologic
+        ensure_helm_repo update
     else
-        echo "Skipping Update."
+        ensure_helm_repo
+        echo "Skipping repo index update."
     fi
 
     # Pass the credentials via a private temp values file instead of on the command
@@ -473,6 +488,9 @@ function output {
     [[ -n "$HELM_VALUES" ]] && require_values_file "$HELM_VALUES"
     read -rp "Name and Location of the rendered Kubernetes Manifest YAML file. [default=sumologic-rendered.yaml]: " K8S_YAML
     : "${K8S_YAML:=${DEFAULT_K8S_YAML}}"
+
+    # The chart is referenced as sumologic/sumologic, so the repo must be registered.
+    ensure_helm_repo
 
     # Only pass -f when a values file is in use; the chart renders with defaults otherwise.
     local template_args=(template --namespace=sumologic --create-namespace)
