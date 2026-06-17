@@ -20,9 +20,6 @@ at the current Bash implementation.
 
 ## P2 — Medium (reliability / maintainability)
 
-- [ ] **Offline `version()`** — `-v` makes a live GitHub API call
-  (`sumo-otel-local.sh` `version`), so it's slow and fails offline. Embed a `VERSION`
-  constant (kept in sync by release automation) and print that instead.
 - [ ] **Guard `kind create cluster` when the cluster already exists** — `init_cluster`
   (`:316,321,324`) lets `kind` emit a raw "already exists" error. Detect via
   `kind get clusters` and offer to reuse or recreate.
@@ -115,6 +112,9 @@ at the current Bash implementation.
 
 ### P2 — Medium (complete)
 
+- [x] Offline `version()` — `-v` now prints an embedded `VERSION` constant (`0.4.0`)
+  instead of querying the GitHub API; no network/`jq`/`curl`. Release automation will
+  keep the constant in sync.
 - [x] Pre-flight dependency check — added `require_cmd` and called it at the start of the
   flows that skip `install_dependencies`: `install_sumo`/`output` require `helm`,
   `uninstall`/`purge` require `kind` (purge's Podman-machine branch also requires `jq`).

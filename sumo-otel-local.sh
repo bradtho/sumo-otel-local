@@ -69,6 +69,10 @@ CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-}"
 # Helm repository for the Sumo Logic collection.
 SUMO_HELM_REPO_URL="https://sumologic.github.io/sumologic-kubernetes-collection"
 
+# Script version. Kept in sync with the published GitHub Release tag (release
+# automation bumps this); printed by -v/--version without any network calls.
+VERSION="0.4.0"
+
 # Verify required commands exist; exit with clear guidance if any are missing.
 # Used by the flows that don't run install_dependencies (-m/-o/-u/-p).
 function require_cmd {
@@ -633,8 +637,7 @@ function purge {
 }
 
 function version {
-    RELEASE=$(curl -L -s https://api.github.com/repos/bradtho/sumo-otel-local/releases/latest | jq -r .tag_name)
-    echo "sumo-otel-local ${RELEASE}"
+    echo "sumo-otel-local ${VERSION}"
 }
 
 ## Helper Functions
