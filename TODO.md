@@ -72,13 +72,14 @@ These cause broken installs, surprise destruction, or secret exposure.
   `MIN_CPU` (4) are now set once at the top via `${VAR:-default}` so they can be
   overridden by environment, with a positive-integer guard. `new_podman` also defaults
   a new machine's memory to `MIN_MEM_MB`. Verified defaults, override, and invalid input.
-- [ ] **Treat Docker and Podman as first-class runtimes** — today `init_cluster`
-  centers on Podman and only asks a yes/no "Are you using Docker Desktop?"
-  (`sumo-otel-local.sh:83-98`), while the Podman machine/resource logic
-  (`new_podman`, `use_existing_podman`) has no Docker equivalent. Detect the available
-  runtime, let the user choose when both exist, and gate Podman-machine handling so
-  Docker users get an equivalent (resource check + KinD provider) path. Podman-only
-  operations like `purge` (`:199-216`) must no-op or branch cleanly under Docker.
+- [x] **Treat Docker and Podman as first-class runtimes** — done. Added
+  `select_runtime` (detects both, prompts when both exist, honors a preset
+  `CONTAINER_RUNTIME`, errors if neither), `set_kind_provider` (exports
+  `KIND_EXPERIMENTAL_PROVIDER` to match), `ensure_podman_ready` (machine logic gated to
+  macOS; native `podman info` on Linux), and `ensure_docker_ready` +
+  `check_docker_resources` (equivalent readiness + resource check). `init_cluster`,
+  `uninstall`, and `purge` branch by runtime; purge's machine teardown is podman+macOS
+  only. Verified select/provider/ready/purge paths with stubs.
 
 ## CI/CD & Releases (gates merge to `main`)
 

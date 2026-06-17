@@ -11,7 +11,7 @@ function help {
     echo "  -n, --init      Install dependencies without setting up the Sumo Operator."
     echo "  -m, --helm      Install Sumo Operator onto existing cluster."
     echo "  -o, --output    Output the rendered Kubernetes manifest YAML file."
-    echo "  -p, --purge     Uninstall the Cluster and Podman Machine."
+    echo "  -p, --purge     Uninstall the cluster (and, with Podman on macOS, the Podman machine)."
     echo "  -u, --uninstall Uninstall the Cluster only."
     echo "  -v, --version   Display the version of the script."
 }
@@ -62,6 +62,10 @@ if ! [[ "$MIN_MEM_MB" =~ ^[0-9]+$ && "$MIN_CPU" =~ ^[0-9]+$ ]]; then
     echo "MIN_MEM_MB and MIN_CPU must be positive integers (got MIN_MEM_MB='${MIN_MEM_MB}', MIN_CPU='${MIN_CPU}')." >&2
     exit 1
 fi
+
+# Container runtime (podman or docker). May be preset via the environment to skip
+# the interactive prompt (e.g. CONTAINER_RUNTIME=docker); select_runtime fills it in.
+CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-}"
 
 # Check Dependencies
 function install_dependencies {
@@ -183,22 +187,114 @@ function select_node_image {
     done
 }
 
+# --- Container runtime (Podman and Docker are both first-class) ---------------
+
+# Select the container runtime into CONTAINER_RUNTIME. Prompts only when both are
+# installed; honors a preset CONTAINER_RUNTIME; returns non-zero if neither exists.
+function select_runtime {
+    local has_podman="no" has_docker="no" choice
+    command -v podman &> /dev/null && has_podman="yes"
+    command -v docker &> /dev/null && has_docker="yes"
+
+    # Honor an explicit override (env var or earlier selection) when it is available.
+    if [[ -n "$CONTAINER_RUNTIME" ]]; then
+        if [[ "$CONTAINER_RUNTIME" == "podman" && "$has_podman" == "yes" ]] \
+        || [[ "$CONTAINER_RUNTIME" == "docker" && "$has_docker" == "yes" ]]; then
+            echo "Using container runtime: ${CONTAINER_RUNTIME}" >&2
+            return 0
+        fi
+        echo "Requested CONTAINER_RUNTIME='${CONTAINER_RUNTIME}' is not available." >&2
+        return 1
+    fi
+
+    if [[ "$has_podman" == "yes" && "$has_docker" == "yes" ]]; then
+        echo "Both Podman and Docker are available." >&2
+        while true; do
+            read -rp "Which runtime should KinD use? [podman/docker] (default=podman): " choice
+            choice="${choice:-podman}"
+            case "$choice" in
+                [Pp]odman|PODMAN) CONTAINER_RUNTIME="podman"; break ;;
+                [Dd]ocker|DOCKER) CONTAINER_RUNTIME="docker"; break ;;
+                *) echo "Please answer 'podman' or 'docker'." >&2 ;;
+            esac
+        done
+    elif [[ "$has_podman" == "yes" ]]; then
+        CONTAINER_RUNTIME="podman"
+    elif [[ "$has_docker" == "yes" ]]; then
+        CONTAINER_RUNTIME="docker"
+    else
+        echo "Neither Podman nor Docker is installed. Install one to continue." >&2
+        return 1
+    fi
+    echo "Using container runtime: ${CONTAINER_RUNTIME}" >&2
+}
+
+# Point KinD at the provider that matches the selected runtime.
+function set_kind_provider {
+    if [[ "$CONTAINER_RUNTIME" == "podman" ]]; then
+        export KIND_EXPERIMENTAL_PROVIDER=podman
+    else
+        export KIND_EXPERIMENTAL_PROVIDER=docker
+    fi
+}
+
+# Best-effort resource check for Docker, mirroring the Podman machine minimums.
+function check_docker_resources {
+    local info ncpu mem_bytes mem_mb
+    info=$(docker info --format '{{.NCPU}} {{.MemTotal}}' 2>/dev/null) || return 0
+    ncpu=${info%% *}
+    mem_bytes=${info##* }
+    [[ "$ncpu" =~ ^[0-9]+$ && "$mem_bytes" =~ ^[0-9]+$ ]] || return 0
+    mem_mb=$(awk "BEGIN { printf \"%d\", $mem_bytes / 1024 / 1024 }")
+    echo "Docker resources: ${mem_mb}MB RAM, ${ncpu} CPUs (minimum ${MIN_MEM_MB}MB / ${MIN_CPU} CPUs)."
+    if [[ "$mem_mb" -lt "$MIN_MEM_MB" || "$ncpu" -lt "$MIN_CPU" ]]; then
+        echo "⚠️  Docker is below the recommended minimums; the Sumo stack may be unstable." >&2
+        echo "    Increase CPU/Memory in Docker Desktop → Settings → Resources." >&2
+    fi
+}
+
+# Ensure Podman is ready. macOS needs a running machine (VM) meeting the minimums;
+# on Linux Podman runs natively, so just confirm it responds.
+function ensure_podman_ready {
+    if [[ "$OS" == "darwin" ]]; then
+        use_existing_podman
+    else
+        if podman info &> /dev/null; then
+            return 0
+        fi
+        echo "Podman is installed but not responding (podman info failed)." >&2
+        return 1
+    fi
+}
+
+# Ensure Docker is running, then report its resources.
+function ensure_docker_ready {
+    if ! docker info &> /dev/null; then
+        echo "Docker is installed but not running. Start Docker and retry." >&2
+        return 1
+    fi
+    echo "Docker is running."
+    check_docker_resources
+    return 0
+}
+
 function init_cluster {
     DEFAULT_CLUSTER_NAME="sumo"
 
-    # Initialise and Start Podman
-    if command -v podman &> /dev/null; then
-        echo "Podman is installed..."
-        if ! use_existing_podman; then
-            echo "Podman machine setup did not complete; aborting."
+    # Choose and prepare the container runtime (Podman or Docker, both first-class).
+    if ! select_runtime; then
+        exit 1
+    fi
+    set_kind_provider
+
+    if [[ "$CONTAINER_RUNTIME" == "podman" ]]; then
+        if ! ensure_podman_ready; then
+            echo "Podman setup did not complete; aborting."
             exit 1
         fi
     else
-        read -rp "Podman is not installed. Are you using Docker Desktop? [y/n]" yn
-        if [[ $yn =~ ^[Yy]$ ]]; then
-            echo "Using Docker Desktop..."
-        else
-            echo "Please install Podman or Docker Desktop to continue."
+        if ! ensure_docker_ready; then
+            echo "Docker setup did not complete; aborting."
             exit 1
         fi
     fi
@@ -379,6 +475,10 @@ function output {
 }
 
 function uninstall {
+    # Match KinD to the runtime that backs the cluster so it can find/delete it.
+    if ! select_runtime; then exit 1; fi
+    set_kind_provider
+
     echo "Caution: This will delete the cluster"
     read -rp "Are you sure you want to continue? [y/n]" yn
     if [[ $yn =~ ^[Yy]$ ]]; then
@@ -391,17 +491,31 @@ function uninstall {
         else
             echo "Deleting Cluster: ${CLUSTER_NAME}"
             kind delete cluster --name "${CLUSTER_NAME}"
-            echo "Leaving Podman Machine intact"
+            if [[ "$CONTAINER_RUNTIME" == "podman" && "$OS" == "darwin" ]]; then
+                echo "Leaving Podman machine intact (use --purge to remove it)."
+            fi
         fi
     else
         echo "Cancelling and exiting script..."
         exit 0
-    fi      
+    fi
 }
 
 function purge {
-    running_machine=$(podman machine list --format json | jq -r '.[] | select(.Running == true) | .Name')
-    echo "Caution: This will delete the cluster and remove the - ${running_machine} - Podman machine!"
+    if ! select_runtime; then exit 1; fi
+    set_kind_provider
+
+    # Podman machines only exist with Podman on macOS; under Docker (or Linux
+    # Podman) there is no machine to remove.
+    local has_machine="no" running_machine=""
+    if [[ "$CONTAINER_RUNTIME" == "podman" && "$OS" == "darwin" ]]; then
+        has_machine="yes"
+        running_machine=$(podman machine list --format json | jq -r '.[] | select(.Running == true) | .Name')
+        echo "Caution: This will delete the cluster and remove the - ${running_machine} - Podman machine!"
+    else
+        echo "Caution: This will delete the cluster. (No Podman machine to remove under ${CONTAINER_RUNTIME}.)"
+    fi
+
     read -rp "Are you sure you want to continue? [y/n]" yn
     if [[ $yn =~ ^[Yy]$ ]]; then
         DEFAULT_CLUSTER_NAME="sumo"
@@ -413,9 +527,11 @@ function purge {
         else
             echo "Deleting Cluster: ${CLUSTER_NAME}"
             kind delete cluster --name "${CLUSTER_NAME}"
-            echo "Stopping and Removing the - ${running_machine} - Podman Machine..."
-            podman machine stop "${running_machine}"
-            podman machine rm "${running_machine}"
+            if [[ "$has_machine" == "yes" && -n "$running_machine" ]]; then
+                echo "Stopping and Removing the - ${running_machine} - Podman Machine..."
+                podman machine stop "${running_machine}"
+                podman machine rm "${running_machine}"
+            fi
         fi
     else
         echo "Cancelling and exiting script..."
