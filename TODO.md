@@ -20,9 +20,6 @@ at the current Bash implementation.
 
 ## P2 — Medium (reliability / maintainability)
 
-- [ ] **Remove `local-image.sh`** — superseded by `select_node_image`. The only unique
-  idea left is the commented-out offline pull/save/load (air-gapped) flow; fold that into
-  the main script or delete the file (leaning delete).
 - [ ] **De-duplicate constants** — `DEFAULT_CLUSTER_NAME="sumo"` is redefined in several
   places; lift to a single top-level constant (alongside `MIN_MEM_MB`/`MIN_CPU`).
 - [ ] **Consolidate Podman-running checks** — the "a machine is already running / stop
@@ -106,6 +103,9 @@ at the current Bash implementation.
 
 ### P2 — Medium (complete)
 
+- [x] Removed `local-image.sh` — its tag picker was superseded by `select_node_image`,
+  and the only unique bit (a commented-out offline pull/save/load flow) wasn't wired up.
+  Deleted; no references remained.
 - [x] Normalize `podman machine` `Memory` units — confirmed podman 5.x reports bytes
   (`"19327352832"` = 18432 MiB); older versions reported MiB. Added a magnitude-based
   `mem_to_mib` helper (≥ 1 GiB-in-bytes → bytes, else already MiB) so the resource check
