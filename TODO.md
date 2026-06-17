@@ -92,8 +92,12 @@ prerequisite for *any* PR merge — treat as high priority alongside P0/P1.
   `kind-config.yaml` / `values.yaml` / `examples/*.yaml`. Scripts were shfmt-formatted
   and the YAML cleaned (trailing whitespace / final newlines) so the first run is green;
   all four checks verified locally with the exact CI commands.
-- [ ] **Register the check as a required status check** on `main` once the workflow name
-  is stable, so the branch-protection rule is actually enforced.
+- [x] **Register the check as a required status check** on `main` — done. Added a
+  `required_status_checks` rule to the active `main` ruleset (id 3514911) requiring
+  `Lint (ubuntu-latest)` and `Lint (macos-latest)`, alongside the existing
+  `pull_request` / `required_signatures` / `deletion` / `non_fast_forward` rules and the
+  admin bypass. `strict_required_status_checks_policy` is false (PRs need not be
+  up-to-date with base before merging).
 - [ ] **Mock-deployment validation job** — in CI, stand up a KinD cluster (e.g.
   `helm/kind-action`), run `helm template`/`helm install --dry-run` (and ideally
   `helm lint`) against `values.yaml` and the `examples/*.yaml` to prove the chart
