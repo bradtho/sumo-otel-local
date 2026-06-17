@@ -27,10 +27,6 @@ at the current Bash implementation.
 - [ ] **Offline `version()`** — `-v` makes a live GitHub API call
   (`sumo-otel-local.sh` `version`), so it's slow and fails offline. Embed a `VERSION`
   constant (kept in sync by release automation) and print that instead.
-- [ ] **Harden `install_dependencies` direct-install path** — it hardcodes
-  `/usr/local/bin` (wrong for Apple Silicon Homebrew at `/opt/homebrew`; needs `sudo`)
-  and always installs `podman` even when the user runs Docker. Make it path-aware and
-  avoid forcing a runtime the user isn't using.
 - [ ] **Guard `kind create cluster` when the cluster already exists** — `init_cluster`
   (`:316,321,324`) lets `kind` emit a raw "already exists" error. Detect via
   `kind get clusters` and offer to reuse or recreate.
@@ -120,6 +116,14 @@ at the current Bash implementation.
 - [x] Configurable Podman minimums (`MIN_MEM_MB`/`MIN_CPU` env-overridable, validated).
 - [x] Docker and Podman both first-class (`select_runtime`, `set_kind_provider`,
   `ensure_podman_ready`/`ensure_docker_ready`, runtime-branched `purge`/`uninstall`).
+
+### P2 — Medium (complete)
+
+- [x] Hardened `install_dependencies` — added `install_bin_dir` (prefers a writable
+  on-PATH dir, falls back to `/usr/local/bin` with `sudo` only when needed, warns if not
+  on PATH) and `install_binary`; direct installs download to `/tmp` then route through it.
+  The runtime (podman) is only installed when the user has neither Docker nor Podman
+  (both the brew and direct paths). Verified the helpers with stubs (5/5).
 
 ### CI / quality (complete)
 

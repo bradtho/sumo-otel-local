@@ -69,12 +69,48 @@ CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-}"
 # Helm repository for the Sumo Logic collection.
 SUMO_HELM_REPO_URL="https://sumologic.github.io/sumologic-kubernetes-collection"
 
+# Pick a directory for direct binary installs: prefer a writable dir already on
+# PATH; otherwise fall back to /usr/local/bin (written via sudo).
+function install_bin_dir {
+    local d
+    for d in "$HOME/.local/bin" /usr/local/bin /opt/homebrew/bin; do
+        case ":$PATH:" in *":$d:"*) ;; *) continue ;; esac
+        [[ -d "$d" && -w "$d" ]] && {
+            printf '%s' "$d"
+            return 0
+        }
+    done
+    printf '/usr/local/bin'
+}
+
+# Install binary $1 into the chosen bin dir as $2, using sudo only when the dir
+# isn't writable. Warns if the dir isn't on PATH.
+function install_binary {
+    local src=$1 name=$2 dir
+    dir=$(install_bin_dir)
+    if [[ -w "$dir" ]]; then
+        mkdir -p "$dir" && mv "$src" "$dir/$name" && chmod +x "$dir/$name"
+    else
+        sudo mkdir -p "$dir" && sudo mv "$src" "$dir/$name" && sudo chmod +x "$dir/$name"
+    fi
+    case ":$PATH:" in
+        *":$dir:"*) ;;
+        *) echo "Note: '$dir' is not on your PATH; add it so '$name' is found." >&2 ;;
+    esac
+    echo "Installed $name to $dir"
+}
+
 # Check Dependencies
 function install_dependencies {
 
     if command -v brew &>/dev/null; then
         echo "Installing Dependencies with Homebrew..."
-        brew install --quiet jq kubectl helm kind podman
+        # Only install a container runtime when the user has neither already.
+        local brew_pkgs=(jq kubectl helm kind)
+        if ! command -v docker &>/dev/null && ! command -v podman &>/dev/null; then
+            brew_pkgs+=(podman)
+        fi
+        brew install --quiet "${brew_pkgs[@]}"
     elif ! command -v brew &>/dev/null; then
         read -rp "Homebrew is not installed. Would you like to install it? [y/n]" yn
         if [[ $yn =~ ^[Yy]$ ]]; then
@@ -85,38 +121,39 @@ function install_dependencies {
             install_dependencies
         else
             echo "Installing Dependencies Directly..."
+            local release
             if ! command -v jq &>/dev/null; then
                 echo "Installing jq..."
-                curl -Lo /usr/local/bin/jq https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-${JQ_OS}-${ARCH}
-                chmod +x /usr/local/bin/jq
+                curl -fsSL -o /tmp/jq "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-${JQ_OS}-${ARCH}"
+                install_binary /tmp/jq jq
             fi
 
             if ! command -v kubectl &>/dev/null; then
                 echo "Installing Kubectl..."
-                curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/${OS}/${ARCH}/kubectl"
-                chmod +x ./kubectl
-                sudo mv ./kubectl /usr/local/bin/kubectl
-                sudo chown root: /usr/local/bin/kubectl
+                curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/${OS}/${ARCH}/kubectl"
+                install_binary /tmp/kubectl kubectl
                 kubectl version --client
             fi
 
             if ! command -v helm &>/dev/null; then
                 echo "Installing Helm..."
-                curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
-                chmod 700 get_helm.sh
-                ./get_helm.sh
+                curl -fsSL -o /tmp/get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
+                chmod 700 /tmp/get_helm.sh
+                /tmp/get_helm.sh
+                rm -f /tmp/get_helm.sh
             fi
 
+            # Only auto-install a runtime when the user has neither Docker nor Podman.
             if ! command -v docker &>/dev/null && ! command -v podman &>/dev/null; then
                 echo "Installing Podman..."
                 if [[ "$OS" == "darwin" ]]; then
-                    RELEASE=$(curl -L -s https://api.github.com/repos/containers/podman/releases/latest | jq -r .tag_name)
-                    curl -Lo "./podman-remote-release-darwin_${ARCH}.zip" "https://github.com/containers/podman/releases/download/${RELEASE}/podman-remote-release-darwin_${ARCH}.zip"
-                    unzip "podman-remote-release-darwin_${ARCH}.zip"
-                    chmod +x ./podman-"${RELEASE}"/usr/bin/podman
-                    sudo mv ./podman-"${RELEASE}"/usr/bin/podman /usr/local/bin/podman
-                    chmod +x ./podman-"${RELEASE}"/usr/bin/podman-mac-helper
-                    sudo mv ./podman-"${RELEASE}"/usr/bin/podman-mac-helper /usr/local/bin/podman-mac-helper
+                    release=$(curl -fsSL https://api.github.com/repos/containers/podman/releases/latest | jq -r .tag_name)
+                    curl -fsSL -o /tmp/podman.zip "https://github.com/containers/podman/releases/download/${release}/podman-remote-release-darwin_${ARCH}.zip"
+                    rm -rf /tmp/podman-extract
+                    unzip -q /tmp/podman.zip -d /tmp/podman-extract
+                    install_binary "/tmp/podman-extract/podman-${release}/usr/bin/podman" podman
+                    install_binary "/tmp/podman-extract/podman-${release}/usr/bin/podman-mac-helper" podman-mac-helper
+                    rm -rf /tmp/podman.zip /tmp/podman-extract
                 else
                     # On Linux, Podman runs natively (no VM/machine) and needs rootless
                     # dependencies a single static binary can't provide. Defer to the
@@ -131,10 +168,9 @@ function install_dependencies {
 
             if ! command -v kind &>/dev/null; then
                 echo "Installing Kind..."
-                RELEASE=$(curl -L -s https://api.github.com/repos/kubernetes-sigs/kind/releases/latest | jq -r .tag_name)
-                curl -Lo ./kind "https://kind.sigs.k8s.io/dl/${RELEASE}/kind-${OS}-${ARCH}"
-                chmod +x ./kind
-                mv ./kind /usr/local/bin/kind
+                release=$(curl -fsSL https://api.github.com/repos/kubernetes-sigs/kind/releases/latest | jq -r .tag_name)
+                curl -fsSL -o /tmp/kind "https://kind.sigs.k8s.io/dl/${release}/kind-${OS}-${ARCH}"
+                install_binary /tmp/kind kind
             fi
         fi
     fi
