@@ -29,10 +29,6 @@ at the current Bash implementation.
 
 ## P4 — Docs / housekeeping
 
-- [ ] **Update README** — it still says "for MacOS" and references a non-existent
-  `install.sh` (should be `sumo-otel-local.sh`); document macOS **+ Linux**, both
-  runtimes, the env knobs (`CONTAINER_RUNTIME`, `MIN_MEM_MB`, `MIN_CPU`,
-  `SUMOLOGIC_ACCESS_ID/KEY`), and the new Kubernetes-version prompt.
 - [ ] **Add `CLAUDE.md`** (run `/init`) documenting structure, prerequisites, and the
   install/uninstall flows.
 - [ ] **Document the secret entries** (`sumologic_access_id`/`_key`) per backend
@@ -46,6 +42,15 @@ at the current Bash implementation.
 ---
 
 ## Done
+
+### P4 — Docs / housekeeping (complete)
+
+- [x] **Rewrote README** — now covers macOS **+ Linux** (and `amd64`/`arm64`), fixes the
+  `install.sh` → `sumo-otel-local.sh` references, documents both runtimes, the env knobs
+  (`CONTAINER_RUNTIME`, `MIN_MEM_MB`, `MIN_CPU`, `ASSUME_YES`, `SUMOLOGIC_ACCESS_ID/KEY`),
+  the unattended `-y` mode, the secret backends (Keychain / secret-tool / env), and the
+  `kindest/node` Kubernetes-version prompt. Also partially covers the "document the secret
+  entries" item below (per-backend; rotation still light).
 
 ### P0 — Critical (all complete)
 
