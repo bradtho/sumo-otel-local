@@ -30,9 +30,9 @@ at the current Bash implementation.
   KinD in Actions was deliberately skipped (flaky; runtime selection is covered by stubs).
 - [ ] **Release automation** — tag-driven (`v*.*.*`) GitHub Release workflow with SemVer
   (continue from `0.4.0`) and generated notes; keep the script's `VERSION` constant in
-  sync (see the offline-`version()` P2 item).
-- [ ] **Adopt a versioning/commit convention** — document SemVer bump rules; consider
-  Conventional Commits so notes/bumps can be automated.
+  sync (see the offline-`version()` P2 item). The convention is now documented
+  ([CONTRIBUTING.md](CONTRIBUTING.md)); a tool such as `release-please` or `git-cliff`
+  can derive the bump + notes from the squash-merged PR-title subjects.
 
 ## P3 — Decision: Bash → Python migration
 
@@ -134,6 +134,11 @@ at the current Bash implementation.
 
 ### CI / quality (complete)
 
+- [x] **Adopted a versioning/commit convention** — [CONTRIBUTING.md](CONTRIBUTING.md)
+  documents SemVer bump rules (with the pre-1.0 `0.x` caveat and the CLI-contract
+  definition of "public API"), Conventional Commits with a type→bump table, the
+  squash-merge implication that **PR titles** are the canonical subjects, and the
+  manual release steps + `VERSION`-constant sync. Sets up the release-automation item.
 - [x] **Mock-deployment validation job** (`mock-deploy`) — adds the `sumologic` repo and
   renders the upstream chart against `values.yaml` + every `examples/*.yaml` with dummy
   credentials (mirroring `install_sumo`'s exact `--set` flags), asserts a non-empty render,
