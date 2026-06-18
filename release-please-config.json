@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "simple",
+  "include-v-in-tag": true,
+  "last-release-sha": "b85d22dce6051bc4f09d83b07a2709bd2d33bce1",
+  "packages": {
+    ".": {
+      "package-name": "sumo-otel-local",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        "sumo-otel-local.sh"
+      ]
+    }
+  }
+}

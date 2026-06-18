@@ -71,9 +71,10 @@ CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-}"
 # Helm repository for the Sumo Logic collection.
 SUMO_HELM_REPO_URL="https://sumologic.github.io/sumologic-kubernetes-collection"
 
-# Script version. Kept in sync with the published GitHub Release tag (release
-# automation bumps this); printed by -v/--version without any network calls.
-VERSION="0.4.0"
+# Script version. Kept in sync with the published GitHub Release tag; printed by
+# -v/--version without any network calls. The trailing annotation lets
+# release-please rewrite this line automatically when it cuts a release.
+VERSION="0.4.0" # x-release-please-version
 
 # Default KinD cluster name, used by create and teardown.
 DEFAULT_CLUSTER_NAME="sumo"

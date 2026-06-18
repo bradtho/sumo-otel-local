@@ -18,8 +18,6 @@ at the current Bash implementation.
 
 ---
 
-## P2 — Medium (reliability / maintainability)
-
 ## CI/CD & Releases
 
 - [ ] **Review the KinD server-side dry-run** — the `mock-deploy` job stands up a KinD
@@ -28,11 +26,6 @@ at the current Bash implementation.
   cluster spin-up). **If it proves flaky/slow, downgrade to `--dry-run=client` or drop the
   cluster** and rely on the render + kubeconform gate, which needs no cluster. Podman-backed
   KinD in Actions was deliberately skipped (flaky; runtime selection is covered by stubs).
-- [ ] **Release automation** — tag-driven (`v*.*.*`) GitHub Release workflow with SemVer
-  (continue from `0.4.0`) and generated notes; keep the script's `VERSION` constant in
-  sync (see the offline-`version()` P2 item). The convention is now documented
-  ([CONTRIBUTING.md](CONTRIBUTING.md)); a tool such as `release-please` or `git-cliff`
-  can derive the bump + notes from the squash-merged PR-title subjects.
 
 ## P3 — Decision: Bash → Python migration
 
@@ -134,6 +127,14 @@ at the current Bash implementation.
 
 ### CI / quality (complete)
 
+- [x] **Release automation** (`release-please`) — a `release-please.yml` workflow with
+  `release-please-config.json` and `.release-please-manifest.json`. On each push to `main`
+  it maintains a release PR whose version/`CHANGELOG.md` are derived from the Conventional-
+  Commit (PR-title) subjects since the last release; merging it tags `vX.Y.Z`, publishes a
+  GitHub Release, and rewrites the script's `VERSION` line (annotated
+  `# x-release-please-version`). Anchored at `last-release-sha` = `main` HEAD so old
+  non-conventional subjects are ignored. Uses `RELEASE_PLEASE_TOKEN` (PAT) if set so the
+  release PR runs CI; otherwise the release PR is merged with admin bypass.
 - [x] **Adopted a versioning/commit convention** — [CONTRIBUTING.md](CONTRIBUTING.md)
   documents SemVer bump rules (with the pre-1.0 `0.x` caveat and the CLI-contract
   definition of "public API"), Conventional Commits with a type→bump table, the

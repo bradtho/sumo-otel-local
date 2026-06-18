@@ -1,0 +1,31 @@
+name: Release
+
+# Runs release-please on every push to main. It maintains a "release PR" whose
+# version + CHANGELOG are computed from the Conventional-Commit subjects merged
+# since the last release (see CONTRIBUTING.md). Because main squash-merges, those
+# subjects are the PR titles. Merging the release PR tags vX.Y.Z, publishes a
+# GitHub Release with generated notes, and (via extra-files) bumps the VERSION
+# constant in sumo-otel-local.sh.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    name: release-please
+    runs-on: ubuntu-latest
+    steps:
+      # Prefer a PAT (RELEASE_PLEASE_TOKEN) so the release PR triggers the CI
+      # required status checks; falls back to GITHUB_TOKEN, in which case the
+      # release PR must be merged with admin bypass (CI won't run on it, and the
+      # required checks won't report). See CONTRIBUTING.md.
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
