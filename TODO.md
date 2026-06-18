@@ -18,15 +18,6 @@ at the current Bash implementation.
 
 ---
 
-## CI/CD & Releases
-
-- [ ] **Review the KinD server-side dry-run** — the `mock-deploy` job stands up a KinD
-  cluster (Docker), pre-applies the chart's CRDs, then runs `helm install --dry-run=server`
-  against every values file. This is the most environment-dependent step (subchart CRDs,
-  cluster spin-up). **If it proves flaky/slow, downgrade to `--dry-run=client` or drop the
-  cluster** and rely on the render + kubeconform gate, which needs no cluster. Podman-backed
-  KinD in Actions was deliberately skipped (flaky; runtime selection is covered by stubs).
-
 ## P3 — Decision: Bash → Python migration
 
 - [ ] **Decide whether to port to Python.** Pros: real arg parsing (`argparse`/`click`),
@@ -145,8 +136,13 @@ at the current Bash implementation.
   credentials (mirroring `install_sumo`'s exact `--set` flags), asserts a non-empty render,
   and schema-checks the output with `kubeconform -ignore-missing-schemas`. Then a KinD
   cluster (Docker, `helm/kind-action`) pre-applies the chart's 12 CRDs and runs
-  `helm install --dry-run=server` per values file. No live Sumo org required. (KinD step
-  flagged for review above.)
+  `helm install --dry-run=server` per values file. No live Sumo org required.
+- [x] **Reviewed the KinD server-side dry-run** (2026-06-18) — kept it. Across 4 CI runs
+  it was 4/4 green with no retries; the job is ~85s (render+kubeconform 16s, KinD create
+  39s, CRD apply 5s, server dry-run 18s), on par with the lint jobs — neither flaky nor
+  slow by the review criterion. Added `timeout-minutes: 15` so a future KinD hang fails
+  fast instead of inheriting the 6-hour default. Documented fallback if it ever regresses:
+  drop to `--dry-run=client`, or rely on the cluster-free render+kubeconform gate.
 - [x] **Fixed `examples/metrics_auth.yaml`** — it set the chart-v5-rejected
   `kube-prometheus-stack.{prometheusOperator,prometheus}.enabled: true` (the render gate
   caught it). Removed those toggles; the `additionalServiceMonitors` intent is preserved

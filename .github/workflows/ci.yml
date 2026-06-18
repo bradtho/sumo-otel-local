@@ -12,6 +12,7 @@ jobs:
   lint:
     name: Lint (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -75,6 +76,11 @@ jobs:
   mock-deploy:
     name: Mock deployment (helm render + KinD dry-run)
     runs-on: ubuntu-latest
+    # Reviewed 2026-06-18: 4/4 green, ~85s (KinD create 39s / dry-run 18s). Kept the
+    # server-side dry-run. The timeout bounds any future KinD hang to 15 min instead
+    # of inheriting the 6-hour default; if the step ever regresses, fall back to
+    # --dry-run=client or the cluster-free render+kubeconform gate (see TODO.md).
+    timeout-minutes: 15
     env:
       SUMO_HELM_REPO_URL: https://sumologic.github.io/sumologic-kubernetes-collection
       CHART: sumologic/sumologic
