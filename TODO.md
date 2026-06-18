@@ -22,10 +22,12 @@ at the current Bash implementation.
 
 ## CI/CD & Releases
 
-- [ ] **Mock-deployment validation job** — stand up a KinD cluster in CI (e.g.
-  `helm/kind-action`), run `helm lint` + `helm template`/`install --dry-run` against
-  `values.yaml` and `examples/*.yaml` with dummy credentials (no live Sumo org).
-  Exercise **both runtimes**: Docker on Linux runners and a Podman-backed KinD provider.
+- [ ] **Review the KinD server-side dry-run** — the `mock-deploy` job stands up a KinD
+  cluster (Docker), pre-applies the chart's CRDs, then runs `helm install --dry-run=server`
+  against every values file. This is the most environment-dependent step (subchart CRDs,
+  cluster spin-up). **If it proves flaky/slow, downgrade to `--dry-run=client` or drop the
+  cluster** and rely on the render + kubeconform gate, which needs no cluster. Podman-backed
+  KinD in Actions was deliberately skipped (flaky; runtime selection is covered by stubs).
 - [ ] **Release automation** — tag-driven (`v*.*.*`) GitHub Release workflow with SemVer
   (continue from `0.4.0`) and generated notes; keep the script's `VERSION` constant in
   sync (see the offline-`version()` P2 item).
@@ -132,6 +134,17 @@ at the current Bash implementation.
 
 ### CI / quality (complete)
 
+- [x] **Mock-deployment validation job** (`mock-deploy`) — adds the `sumologic` repo and
+  renders the upstream chart against `values.yaml` + every `examples/*.yaml` with dummy
+  credentials (mirroring `install_sumo`'s exact `--set` flags), asserts a non-empty render,
+  and schema-checks the output with `kubeconform -ignore-missing-schemas`. Then a KinD
+  cluster (Docker, `helm/kind-action`) pre-applies the chart's 12 CRDs and runs
+  `helm install --dry-run=server` per values file. No live Sumo org required. (KinD step
+  flagged for review above.)
+- [x] **Fixed `examples/metrics_auth.yaml`** — it set the chart-v5-rejected
+  `kube-prometheus-stack.{prometheusOperator,prometheus}.enabled: true` (the render gate
+  caught it). Removed those toggles; the `additionalServiceMonitors` intent is preserved
+  (the ServiceMonitor CRD/operator ship with the chart's bundled dependency). README updated.
 - [x] `shellcheck`-clean and `shfmt -i 4 -ci`-formatted.
 - [x] GitHub Actions CI (`bash -n` + shellcheck + shfmt + yamllint) on an Ubuntu + macOS
   matrix, triggered on PRs and pushes to `dev`.

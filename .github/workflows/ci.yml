@@ -65,3 +65,126 @@ jobs:
 
       - name: yamllint
         run: yamllint -c .yamllint.yml kind-config.yaml values.yaml examples/*.yaml
+
+  # Validates a "mock" deployment with no live Sumo org: the upstream sumologic
+  # chart is rendered against every values file with dummy credentials (mirroring
+  # the flags sumo-otel-local.sh passes), the rendered manifests are schema-checked
+  # with kubeconform, and finally a KinD cluster validates them server-side via
+  # `helm install --dry-run=server` (CRDs are pre-applied so custom resources
+  # validate). Docker-only — see TODO.md if the server dry-run proves flaky.
+  mock-deploy:
+    name: Mock deployment (helm render + KinD dry-run)
+    runs-on: ubuntu-latest
+    env:
+      SUMO_HELM_REPO_URL: https://sumologic.github.io/sumologic-kubernetes-collection
+      CHART: sumologic/sumologic
+      NS: sumologic
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install kubeconform
+        run: |
+          KUBECONFORM_VERSION=v0.7.0
+          curl -fsSL -o /tmp/kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+          sudo mv /tmp/kubeconform /usr/local/bin/kubeconform
+          kubeconform -v
+
+      - name: Add sumologic Helm repo
+        run: |
+          helm repo add sumologic "$SUMO_HELM_REPO_URL" --force-update
+          helm repo update sumologic
+
+      - name: Write dummy credentials
+        run: |
+          umask 077
+          cat > /tmp/ci-creds.yaml <<'EOF'
+          sumologic:
+            accessId: "ciDummyAccessId"
+            accessKey: "ciDummyAccessKey"
+          EOF
+
+      # Mirrors the flags sumo-otel-local.sh's install_sumo() passes. Renders every
+      # values file the repo ships and schema-checks the output. -ignore-missing-schemas
+      # skips CRDs/custom resources kubeconform has no schema for (validated server-side later).
+      - name: Render & schema-check all values files
+        run: |
+          common_flags=(
+            --namespace "$NS" --create-namespace
+            -f /tmp/ci-creds.yaml
+            --set-string sumologic.clusterName=ci-test
+            --set-string fullnameOverride=sumo
+            --set sumologic.falco.enabled=false
+            --set sumologic.logs.systemd.enabled=false
+          )
+          fail=0
+          for vf in values.yaml examples/*.yaml; do
+            echo "::group::render $vf"
+            if helm template sumologic "$CHART" "${common_flags[@]}" -f "$vf" > "/tmp/rendered.yaml"; then
+              docs=$(grep -c '^kind:' /tmp/rendered.yaml || true)
+              if [[ "$docs" -lt 1 ]]; then
+                echo "::error file=$vf::rendered 0 manifests"
+                fail=1
+              else
+                echo "rendered $docs manifests"
+                kubeconform -ignore-missing-schemas -summary /tmp/rendered.yaml || fail=1
+              fi
+            else
+              echo "::error file=$vf::helm template failed"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$fail"
+
+      - name: Create KinD cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: ci-mock
+
+      # Pre-apply the chart's CRDs so the custom resources it renders
+      # (OpenTelemetryCollector, ServiceMonitor, PrometheusRule, ...) validate
+      # against the API server during the dry-run.
+      - name: Pre-apply chart CRDs
+        run: |
+          # Extract ONLY the CustomResourceDefinition documents from --include-crds
+          # output (applying the full render would create resources, defeating the
+          # dry-run). --server-side avoids the "annotations too long" client-side
+          # limit the large prometheus-operator CRDs hit.
+          helm template sumologic "$CHART" --namespace "$NS" --include-crds \
+            -f /tmp/ci-creds.yaml --set-string sumologic.clusterName=ci-test \
+            | awk '
+                function flush() { if (isCRD && buf != "") printf "---\n%s", buf; buf=""; isCRD=0 }
+                /^---[[:space:]]*$/ { flush(); next }
+                { buf = buf $0 "\n"; if ($0 ~ /^kind: CustomResourceDefinition[[:space:]]*$/) isCRD=1 }
+                END { flush() }
+              ' \
+            | kubectl apply --server-side -f -
+          kubectl get crds
+
+      - name: helm install --dry-run=server
+        run: |
+          common_flags=(
+            --namespace "$NS" --create-namespace
+            -f /tmp/ci-creds.yaml
+            --set-string sumologic.clusterName=ci-test
+            --set-string fullnameOverride=sumo
+            --set sumologic.falco.enabled=false
+            --set sumologic.logs.systemd.enabled=false
+          )
+          fail=0
+          for vf in values.yaml examples/*.yaml; do
+            echo "::group::dry-run $vf"
+            if ! helm install sumologic "$CHART" --dry-run=server "${common_flags[@]}" -f "$vf" >/dev/null; then
+              echo "::error file=$vf::server-side dry-run failed"
+              fail=1
+            else
+              echo "server-side dry-run OK"
+            fi
+            echo "::endgroup::"
+          done
+          exit "$fail"

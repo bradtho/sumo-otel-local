@@ -24,8 +24,6 @@ sumologic:
         selector:
           matchLabels:
             app: no-auth-metrics-service
-kube-prometheus-stack:
-  prometheusOperator:
-    enabled: true
-  prometheus:
-    enabled: true
+# NOTE: chart v5 collects metrics via the bundled OpenTelemetry Collector. The old
+# kube-prometheus-stack.{prometheusOperator,prometheus}.enabled toggles were removed —
+# the v5 chart rejects them. additionalServiceMonitors above still work as before.

@@ -67,9 +67,12 @@ Code for the Python Apps can be found at [github.com/bradtho/auth-metrics](https
 [github.com/bradtho/no-auth-metrics](https://github.com/bradtho/no-auth-metrics)
 
 Once these Kuberenetes resources have been installed you can then run the Helm Deployment which will install a ServiceMonitor via
-`sumologic.metrics.additionalServiceMonitors` as well as enable the Prometheus Operator and Prometheus. This is required because the
-`sumologic.metrics.additionalServiceMonitors` does not support Authenticated endpoints on multiple endpoints. We need to work around
-this limitation by installing Prometheus and utilising its support for Authenticated endpoints.
+`sumologic.metrics.additionalServiceMonitors`. The ServiceMonitor CRD and the operator that reconciles it are provided by the chart's
+bundled `kube-prometheus-stack` dependency, so no extra toggles are required.
+
+> **Note:** chart v5 collects metrics through the bundled OpenTelemetry Collector and **rejects** the old
+> `kube-prometheus-stack.prometheusOperator.enabled` / `kube-prometheus-stack.prometheus.enabled` values, so they have been removed
+> from `metrics_auth.yaml`.
 
 ## Notes
 
