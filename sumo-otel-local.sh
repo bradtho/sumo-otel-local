@@ -14,6 +14,8 @@ function help {
     echo "  -p, --purge     Uninstall the cluster (and, with Podman on macOS, the Podman machine)."
     echo "  -u, --uninstall Uninstall the Cluster only."
     echo "  -v, --version   Display the version of the script."
+    echo "  -y, --yes       Run unattended: assume yes and use defaults for all prompts."
+    echo "                  (also via the ASSUME_YES env var; --non-interactive is an alias)"
 }
 
 # Detect OS and CPU architecture, normalized to the tokens used by release assets.
@@ -76,6 +78,37 @@ VERSION="0.4.0"
 # Default KinD cluster name, used by create and teardown.
 DEFAULT_CLUSTER_NAME="sumo"
 
+# Unattended mode: when set (via -y/--yes/--non-interactive or the ASSUME_YES env
+# var), confirm() auto-answers yes and value prompts use their defaults without
+# blocking on input.
+ASSUME_YES="${ASSUME_YES:-}"
+
+# Ask a yes/no question. $1=prompt, $2=default (y|n, default n). Returns 0 for yes.
+# In unattended mode (ASSUME_YES) it answers yes without prompting.
+function confirm {
+    local prompt=$1 default=${2:-n} reply hint
+    [[ "$default" == "y" ]] && hint="[Y/n]" || hint="[y/N]"
+    if [[ -n "$ASSUME_YES" ]]; then
+        echo "${prompt} ${hint} y (assumed)" >&2
+        return 0
+    fi
+    read -rp "${prompt} ${hint} " reply
+    reply=${reply:-$default}
+    [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+# Read a value with a default ($2). In unattended mode, returns the default without
+# prompting. Echoes the result to stdout.
+function ask {
+    local prompt=$1 default=${2:-} reply
+    if [[ -n "$ASSUME_YES" ]]; then
+        printf '%s' "$default"
+        return 0
+    fi
+    read -rp "$prompt" reply
+    printf '%s' "${reply:-$default}"
+}
+
 # Verify required commands exist; exit with clear guidance if any are missing.
 # Used by the flows that don't run install_dependencies (-m/-o/-u/-p).
 function require_cmd {
@@ -133,8 +166,7 @@ function install_dependencies {
         fi
         brew install --quiet "${brew_pkgs[@]}"
     elif ! command -v brew &>/dev/null; then
-        read -rp "Homebrew is not installed. Would you like to install it? [y/n]" yn
-        if [[ $yn =~ ^[Yy]$ ]]; then
+        if confirm "Homebrew is not installed. Install it?" n; then
             curl -fsSL -o install_homebrew.sh https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
             chmod 700 install_homebrew.sh
             ./install_homebrew.sh
@@ -270,6 +302,11 @@ function select_runtime {
     fi
 
     if [[ "$has_podman" == "yes" && "$has_docker" == "yes" ]]; then
+        if [[ -n "$ASSUME_YES" ]]; then
+            CONTAINER_RUNTIME="podman"
+            echo "Both runtimes available; defaulting to podman (unattended)." >&2
+            return 0
+        fi
         echo "Both Podman and Docker are available." >&2
         while true; do
             read -rp "Which runtime should KinD use? [podman/docker] (default=podman): " choice
@@ -371,13 +408,12 @@ function init_cluster {
     fi
 
     # Cluster name is asked once, regardless of the version choice.
-    read -rp "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " CLUSTER_NAME
-    : "${CLUSTER_NAME:=${DEFAULT_CLUSTER_NAME}}"
+    CLUSTER_NAME=$(ask "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
 
     # Handle an existing cluster of the same name instead of letting kind error out.
     if cluster_exists "$CLUSTER_NAME"; then
         echo "A KinD cluster named '${CLUSTER_NAME}' already exists."
-        read -rp "Reuse it (r), recreate it [delete + create] (d), or cancel (c)? [r/d/c]: " choice
+        choice=$(ask "Reuse it (r), recreate it [delete + create] (d), or cancel (c)? [r/d/c]: " "r")
         case "$choice" in
             [Rr]*)
                 echo "Reusing existing cluster '${CLUSTER_NAME}'."
@@ -394,8 +430,7 @@ function init_cluster {
         esac
     fi
 
-    read -rp "KinD will install the latest Kubernetes version, is this OK? [y/n]" yn
-    if [[ $yn =~ ^[Yy]$ ]]; then
+    if confirm "KinD will install the latest Kubernetes version. OK?" y; then
         kind create cluster --name "${CLUSTER_NAME}" --config kind-config.yaml
     else
         node_image=$(select_node_image)
@@ -496,6 +531,10 @@ function install_sumo {
     ## Securely handle ACCESS_ID and ACCESS_KEY
 
     if ! ACCESS_ID=$(secret_get sumologic_access_id); then
+        if [[ -n "$ASSUME_YES" ]]; then
+            echo "Error: Access ID not found and running unattended. Set SUMOLOGIC_ACCESS_ID or store it first." >&2
+            exit 1
+        fi
         echo "Sumo Logic Access ID not found in secret storage"
         read -rsp "Enter Sumo Logic Access ID: " ACCESS_ID
         echo ""
@@ -503,6 +542,10 @@ function install_sumo {
     fi
 
     if ! ACCESS_KEY=$(secret_get sumologic_access_key); then
+        if [[ -n "$ASSUME_YES" ]]; then
+            echo "Error: Access Key not found and running unattended. Set SUMOLOGIC_ACCESS_KEY or store it first." >&2
+            exit 1
+        fi
         echo "Sumo Logic Access Key not found in secret storage"
         read -rsp "Enter Sumo Logic Access Key: " ACCESS_KEY
         echo ""
@@ -512,7 +555,7 @@ function install_sumo {
     DEFAULT_HELM_VALUES="values.yaml"
     echo "A Helm values file is optional; the chart can install with --set values alone."
     echo "Example values live in the examples folder, e.g. examples/metrics_interval.yaml"
-    read -rp "Path to a Helm values file (blank to skip) [default if present=${DEFAULT_HELM_VALUES}]: " HELM_VALUES
+    HELM_VALUES=$(ask "Path to a Helm values file (blank to skip) [default if present=${DEFAULT_HELM_VALUES}]: " "")
     # Blank falls back to the default file only when it actually exists.
     if [[ -z "$HELM_VALUES" && -f "$DEFAULT_HELM_VALUES" ]]; then
         HELM_VALUES="$DEFAULT_HELM_VALUES"
@@ -520,12 +563,10 @@ function install_sumo {
     # A values file is optional, but if one is named it must exist.
     [[ -n "$HELM_VALUES" ]] && require_values_file "$HELM_VALUES"
 
-    read -rp "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " CLUSTER_NAME
-    : "${CLUSTER_NAME:=${DEFAULT_CLUSTER_NAME}}"
+    CLUSTER_NAME=$(ask "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
 
     # Always ensure the repo is registered; the prompt only controls refreshing it.
-    read -rp "Check for Helm repo updates? [y/n]" yn
-    if [[ $yn =~ ^[Yy]$ ]]; then
+    if confirm "Check for Helm repo updates?" n; then
         ensure_helm_repo update
     else
         ensure_helm_repo
@@ -562,13 +603,12 @@ function output {
     DEFAULT_HELM_VALUES="values.yaml"
     DEFAULT_K8S_YAML="sumologic-rendered.yaml"
 
-    read -rp "Path to a Helm values file (blank to skip) [default if present=${DEFAULT_HELM_VALUES}]: " HELM_VALUES
+    HELM_VALUES=$(ask "Path to a Helm values file (blank to skip) [default if present=${DEFAULT_HELM_VALUES}]: " "")
     if [[ -z "$HELM_VALUES" && -f "$DEFAULT_HELM_VALUES" ]]; then
         HELM_VALUES="$DEFAULT_HELM_VALUES"
     fi
     [[ -n "$HELM_VALUES" ]] && require_values_file "$HELM_VALUES"
-    read -rp "Name and Location of the rendered Kubernetes Manifest YAML file. [default=sumologic-rendered.yaml]: " K8S_YAML
-    : "${K8S_YAML:=${DEFAULT_K8S_YAML}}"
+    K8S_YAML=$(ask "Name and Location of the rendered Kubernetes Manifest YAML file. [default=sumologic-rendered.yaml]: " "$DEFAULT_K8S_YAML")
 
     # The chart is referenced as sumologic/sumologic, so the repo must be registered.
     ensure_helm_repo
@@ -588,10 +628,8 @@ function uninstall {
     set_kind_provider
 
     echo "Caution: This will delete the cluster"
-    read -rp "Are you sure you want to continue? [y/n]" yn
-    if [[ $yn =~ ^[Yy]$ ]]; then
-        read -rp "Type the name of the cluster (Default: sumo) to continue. Type [exit] to cancel: " CLUSTER_NAME
-        : "${CLUSTER_NAME:=${DEFAULT_CLUSTER_NAME}}"
+    if confirm "Are you sure you want to continue?" n; then
+        CLUSTER_NAME=$(ask "Type the name of the cluster (Default: ${DEFAULT_CLUSTER_NAME}) to continue. Type [exit] to cancel: " "$DEFAULT_CLUSTER_NAME")
         if [[ $CLUSTER_NAME == "exit" ]]; then
             echo "Cancelling and exiting script..."
             exit 0
@@ -625,10 +663,8 @@ function purge {
         echo "Caution: This will delete the cluster. (No Podman machine to remove under ${CONTAINER_RUNTIME}.)"
     fi
 
-    read -rp "Are you sure you want to continue? [y/n]" yn
-    if [[ $yn =~ ^[Yy]$ ]]; then
-        read -rp "Type the name of the cluster (Default: sumo) to continue. Type [exit] to cancel: " CLUSTER_NAME
-        : "${CLUSTER_NAME:=${DEFAULT_CLUSTER_NAME}}"
+    if confirm "Are you sure you want to continue?" n; then
+        CLUSTER_NAME=$(ask "Type the name of the cluster (Default: ${DEFAULT_CLUSTER_NAME}) to continue. Type [exit] to cancel: " "$DEFAULT_CLUSTER_NAME")
         if [[ $CLUSTER_NAME == "exit" ]]; then
             echo "Cancelling and exiting script..."
             exit 0
@@ -684,12 +720,11 @@ function mem_to_mib {
 # Only one Podman machine can run at a time. If one is running, offer to stop it.
 # Returns 0 if nothing is running or it was stopped, 1 if the user declines.
 function stop_running_machine {
-    local running_machine stop_choice
+    local running_machine
     running_machine=$(podman machine list --format json | jq -r '.[] | select(.Running == true) | .Name')
     [[ -z "$running_machine" ]] && return 0
     echo "Podman machine '$running_machine' is currently running (only one can run at a time)."
-    read -rp "Stop it before continuing? [y/N]: " stop_choice
-    if [[ "$stop_choice" =~ ^[Yy]$ ]]; then
+    if confirm "Stop it before continuing?" n; then
         echo "Stopping '$running_machine'..."
         podman machine stop "$running_machine"
         return 0
@@ -702,10 +737,8 @@ function new_podman {
     echo "Creating a new Podman machine..."
     DEFAULT_NAME="sumo"
     DEFAULT_MEMORY="${MIN_MEM_MB}" # default a new machine to the configured minimum
-    read -rp "Allocate memory for Podman machine (in MiB) [default=${DEFAULT_MEMORY}]: " MEMORY
-    read -rp "Name of the Podman machine [default=${DEFAULT_NAME}]: " NAME
-    : "${MEMORY:=${DEFAULT_MEMORY}}"
-    : "${NAME:=${DEFAULT_NAME}}"
+    MEMORY=$(ask "Allocate memory for Podman machine (in MiB) [default=${DEFAULT_MEMORY}]: " "$DEFAULT_MEMORY")
+    NAME=$(ask "Name of the Podman machine [default=${DEFAULT_NAME}]: " "$DEFAULT_NAME")
 
     # Free the single run slot before creating/starting the new machine.
     stop_running_machine || return 1
@@ -752,9 +785,7 @@ function use_existing_podman {
     # Check if any valid machine was found
     if [[ ${#valid_names[@]} -eq 0 ]]; then
         echo "No Podman machines meet the minimum requirements (≥ ${MIN_MEM_MB}MB RAM, ≥ ${MIN_CPU} CPUs)."
-        read -rp "Would you like to create a new Podman machine with the correct specs? [y/N]: " create_choice
-
-        if [[ "$create_choice" =~ ^[Yy]$ ]]; then
+        if confirm "Create a new Podman machine with the correct specs?" n; then
             # new_podman stops any running machine before starting the new one.
             new_podman || return 1
             return 0
@@ -779,7 +810,11 @@ function use_existing_podman {
         echo "$create_option. Create a new Podman machine"
         echo "$exit_option. None (exit)"
 
-        read -rp "Enter your choice [1-$exit_option]: " selection
+        if [[ -n "$ASSUME_YES" ]]; then
+            selection=1 # unattended: use the first machine that meets the minimums
+        else
+            read -rp "Enter your choice [1-$exit_option]: " selection
+        fi
 
         # Check input is numeric
         if ! [[ "$selection" =~ ^[0-9]+$ ]]; then
@@ -814,8 +849,7 @@ function use_existing_podman {
 
         if [[ "$machine_running" != "true" ]]; then
             echo "Machine '$chosen_machine' is not running."
-            read -rp "Would you like to start it now? [y/N]: " start_choice
-            if [[ "$start_choice" =~ ^[Yy]$ ]]; then
+            if confirm "Start it now?" n; then
                 echo "Starting Podman machine '$chosen_machine'..."
                 podman machine start "$chosen_machine"
             else
@@ -884,13 +918,16 @@ while [[ $# -gt 0 ]]; do
             version
             exit 0
             ;;
+        -y | --yes | --non-interactive)
+            # Modifier (not an action): enable unattended mode, then process the
+            # remaining args. Place before the action flag, e.g. `-y -i`.
+            ASSUME_YES="yes"
+            ;;
         *)
             echo "Invalid Option: $1"
             help
             exit 1
             ;;
     esac
-    # Each case branch exits, so this is only reached if that ever changes.
-    # shellcheck disable=SC2317
     shift
 done

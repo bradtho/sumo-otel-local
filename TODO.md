@@ -20,12 +20,6 @@ at the current Bash implementation.
 
 ## P2 — Medium (reliability / maintainability)
 
-- [ ] **Consistent confirmation prompts** — mix of `[y/n]`, `[y/N]`, and case handling;
-  standardize a `confirm()` helper.
-- [ ] **Add a `--non-interactive` / env-driven mode** so the script can run unattended
-  (needed by the CI mock-deployment job and friendlier scripting). `read` prompts
-  currently fail on EOF under `set -e`.
-
 ## CI/CD & Releases
 
 - [ ] **Mock-deployment validation job** — stand up a KinD cluster in CI (e.g.
@@ -99,6 +93,13 @@ at the current Bash implementation.
 
 ### P2 — Medium (complete)
 
+- [x] Standardized confirmation prompts behind a `confirm()` helper (consistent
+  `[y/N]`/`[Y/n]` hints + default handling); all y/n prompts now route through it.
+- [x] Added an unattended / env-driven mode — `-y`/`--yes`/`--non-interactive` (or the
+  `ASSUME_YES` env var). `confirm()` auto-answers yes and an `ask()` helper returns
+  defaults without blocking; value prompts use it. The flag is a modifier (e.g. `-y -i`).
+  Secrets must come from storage/env in unattended mode (clear error otherwise).
+  Verified confirm/ask both modes, flag parsing, and a no-stdin uninstall (15/15).
 - [x] De-duplicated `DEFAULT_CLUSTER_NAME` — lifted to a single top-level constant
   (with `VERSION`/`MIN_*`); removed the four inline `="sumo"` assignments.
 - [x] Consolidated the Podman "a machine is already running / stop it?" logic into a
