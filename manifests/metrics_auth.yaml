@@ -12,8 +12,8 @@ metadata:
     app: auth-metrics
 type: Opaque
 data:
-  username: cHJvbWV0aGV1cw== #prometheus base64 encoded
-  password: Y2hhbmdlbWU= #changeme base64 encoded
+  username: cHJvbWV0aGV1cw== # prometheus base64 encoded
+  password: Y2hhbmdlbWU= # changeme base64 encoded
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -122,8 +122,8 @@ spec:
   ports:
     - name: http
       port: 8080
-      protocol: TCP       
-      targetPort: 8080 
+      protocol: TCP
+      targetPort: 8080
     - name: metrics1
       port: 8081
       protocol: TCP

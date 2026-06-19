@@ -65,7 +65,7 @@ jobs:
         run: shfmt -d -i 4 -ci ./*.sh
 
       - name: yamllint
-        run: yamllint -c .yamllint.yml kind-config.yaml values.yaml examples/*.yaml
+        run: yamllint -c .yamllint.yml kind-config.yaml values.yaml examples/*.yaml manifests/*.yaml
 
   # Validates a "mock" deployment with no live Sumo org: the upstream sumologic
   # chart is rendered against every values file with dummy credentials (mirroring

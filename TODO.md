@@ -27,10 +27,7 @@ at the current Bash implementation.
   shelling out to `kubectl`/`helm`/`kind`/`podman`/`docker`; add `pyproject.toml`,
   `pytest`, and extend CI.
 
-## P4 — Docs / housekeeping
-
-- [ ] **Lint `manifests/*.yaml` too** — CI's yamllint currently covers `kind-config.yaml`,
-  `values.yaml`, and `examples/*.yaml` but not `manifests/`.
+_P4 backlog clear — see the Done section below._
 
 ---
 
@@ -38,6 +35,10 @@ at the current Bash implementation.
 
 ### P4 — Docs / housekeeping (complete)
 
+- [x] **Lint `manifests/*.yaml` in CI** — added `manifests/*.yaml` to the yamllint step.
+  The file failed first (trailing spaces, missing final newline, `#comment` spacing), so
+  fixed those; one non-failing `comments-indentation` warning on a commented-out example
+  annotation block remains (fixing it would misrepresent where the annotations sit).
 - [x] **`.gitignore` generated artifacts** — added `sumologic-rendered.yaml` (the
   `-o`/--output default, `tee`d into the cwd) and `install_homebrew.sh` (a leftover only
   if the Homebrew bootstrap fails before its own `rm`). Confirmed via inspection that the
