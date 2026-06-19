@@ -1,2 +1,13 @@
 .DS_Store
 *.tar*
+
+# Rendered manifest from `-o`/--output (default file name; `tee`d into the cwd).
+sumologic-rendered.yaml
+
+# Leftover only if the Homebrew bootstrap fails before install_dependencies'
+# own `rm` runs (the ERR trap would exit first).
+install_homebrew.sh
+
+# Note: the direct-install downloads for jq/kubectl/kind/helm/podman all go to
+# /tmp (then install_binary moves them onto PATH), so they never land in the repo
+# and don't need ignoring here.

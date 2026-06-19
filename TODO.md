@@ -29,9 +29,6 @@ at the current Bash implementation.
 
 ## P4 — Docs / housekeeping
 
-- [ ] **`.gitignore` generated artifacts** — the `output` default `sumologic-rendered.yaml`
-  and direct-install leftovers (downloaded `kind`/`kubectl`, podman zips). Currently only
-  `.DS_Store` and `*.tar*` are ignored.
 - [ ] **Lint `manifests/*.yaml` too** — CI's yamllint currently covers `kind-config.yaml`,
   `values.yaml`, and `examples/*.yaml` but not `manifests/`.
 
@@ -41,6 +38,12 @@ at the current Bash implementation.
 
 ### P4 — Docs / housekeeping (complete)
 
+- [x] **`.gitignore` generated artifacts** — added `sumologic-rendered.yaml` (the
+  `-o`/--output default, `tee`d into the cwd) and `install_homebrew.sh` (a leftover only
+  if the Homebrew bootstrap fails before its own `rm`). Confirmed via inspection that the
+  jq/kubectl/kind/helm/podman direct-install downloads all go to `/tmp` (then
+  `install_binary` moves them onto PATH), so they never land in the repo — noted in the
+  file instead of adding misleading bare `kind`/`kubectl` ignores.
 - [x] **Documented the secret entries & rotation** — README's "Credentials & secret
   storage" now names the `sumologic_access_id` / `sumologic_access_key` entries, notes
   that stored entries are reused silently (so changing creds needs an overwrite/delete),
