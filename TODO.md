@@ -29,8 +29,6 @@ at the current Bash implementation.
 
 ## P4 — Docs / housekeeping
 
-- [ ] **Add `CLAUDE.md`** (run `/init`) documenting structure, prerequisites, and the
-  install/uninstall flows.
 - [ ] **Document the secret entries** (`sumologic_access_id`/`_key`) per backend
   (Keychain / secret-tool / env) and how to rotate them.
 - [ ] **`.gitignore` generated artifacts** — the `output` default `sumologic-rendered.yaml`
@@ -45,6 +43,11 @@ at the current Bash implementation.
 
 ### P4 — Docs / housekeeping (complete)
 
+- [x] **Added `CLAUDE.md`** — repo guidance for future work: layout, the script's
+  structure (constants, the flag→flow dispatch table, helper groups), the hard
+  constraints (Bash 3.2, `set -euo pipefail`, no-creds-on-CLI, stderr-for-UI), the exact
+  lint/validate gate, the stub-harness verification approach, and the `dev`/`main` +
+  signed-commit + Conventional-Commit/release-please workflow.
 - [x] **Rewrote README** — now covers macOS **+ Linux** (and `amd64`/`arm64`), fixes the
   `install.sh` → `sumo-otel-local.sh` references, documents both runtimes, the env knobs
   (`CONTAINER_RUNTIME`, `MIN_MEM_MB`, `MIN_CPU`, `ASSUME_YES`, `SUMOLOGIC_ACCESS_ID/KEY`),
