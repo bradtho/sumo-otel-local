@@ -29,8 +29,6 @@ at the current Bash implementation.
 
 ## P4 — Docs / housekeeping
 
-- [ ] **Document the secret entries** (`sumologic_access_id`/`_key`) per backend
-  (Keychain / secret-tool / env) and how to rotate them.
 - [ ] **`.gitignore` generated artifacts** — the `output` default `sumologic-rendered.yaml`
   and direct-install leftovers (downloaded `kind`/`kubectl`, podman zips). Currently only
   `.DS_Store` and `*.tar*` are ignored.
@@ -43,6 +41,12 @@ at the current Bash implementation.
 
 ### P4 — Docs / housekeeping (complete)
 
+- [x] **Documented the secret entries & rotation** — README's "Credentials & secret
+  storage" now names the `sumologic_access_id` / `sumologic_access_key` entries, notes
+  that stored entries are reused silently (so changing creds needs an overwrite/delete),
+  and gives per-backend inspect/rotate/delete commands for Keychain (`security … -U`),
+  libsecret (`secret-tool store`/`clear`), and the env fallback — plus the caveat that
+  `-p`/`--purge` clears them but also tears down the cluster.
 - [x] **Added `CLAUDE.md`** — repo guidance for future work: layout, the script's
   structure (constants, the flag→flow dispatch table, helper groups), the hard
   constraints (Bash 3.2, `set -euo pipefail`, no-creds-on-CLI, stderr-for-UI), the exact

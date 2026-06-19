@@ -98,9 +98,51 @@ chosen automatically:
 - **Fallback** → environment variables `SUMOLOGIC_ACCESS_ID` / `SUMOLOGIC_ACCESS_KEY`
   (nothing is persisted; export them to avoid re-entering).
 
-`-p`/`--purge` removes the stored `sumologic_access_id` / `sumologic_access_key`
-entries. Credentials are never passed on the Helm command line — they're written to a
-private, `chmod 600` temporary values file that is deleted on exit.
+Both entries are named `sumologic_access_id` and `sumologic_access_key`. The install
+flow only prompts when an entry is **not found** — once stored, it is reused silently,
+so to change credentials you must overwrite or delete the stored entry (see below).
+
+Credentials are never passed on the Helm command line — they're written to a private,
+`chmod 600` temporary values file that is deleted on exit.
+
+### Inspecting & rotating credentials
+
+**macOS Keychain** (the same items appear in _Keychain Access.app_):
+
+```bash
+# Inspect
+security find-generic-password -s sumologic_access_id -w
+
+# Rotate in place (-U updates the existing item)
+security add-generic-password -U -a "$USER" -s sumologic_access_id -w 'NEW_ACCESS_ID'
+security add-generic-password -U -a "$USER" -s sumologic_access_key -w 'NEW_ACCESS_KEY'
+
+# …or delete so the next install re-prompts
+security delete-generic-password -s sumologic_access_id
+security delete-generic-password -s sumologic_access_key
+```
+
+**Linux libsecret** (`secret-tool`):
+
+```bash
+# Inspect
+secret-tool lookup service sumologic_access_id
+
+# Rotate (store overwrites the existing entry)
+printf %s 'NEW_ACCESS_ID'  | secret-tool store --label=sumologic_access_id  service sumologic_access_id
+printf %s 'NEW_ACCESS_KEY' | secret-tool store --label=sumologic_access_key service sumologic_access_key
+
+# …or clear so the next install re-prompts
+secret-tool clear service sumologic_access_id
+secret-tool clear service sumologic_access_key
+```
+
+**Environment fallback:** nothing is cached — just re-export `SUMOLOGIC_ACCESS_ID` /
+`SUMOLOGIC_ACCESS_KEY` with the new values.
+
+`-p`/`--purge` also removes both stored entries, but it tears down the cluster (and the
+Podman machine on macOS) too — for a credentials-only change, prefer the per-backend
+commands above.
 
 ## Kubernetes version
 
