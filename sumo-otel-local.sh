@@ -362,7 +362,7 @@ function select_node_image {
 
     if [[ ${#tags[@]} -eq 0 ]]; then
         echo "Could not fetch a tag list (offline or API change)." >&2
-        read -rp "Enter a kindest/node version tag (e.g. v1.32.2), blank for kind's default: " manual
+        read -rp "Enter a kindest/node version tag (e.g. v1.32.2), blank for kind's default: " manual || manual=""
         [[ -n "$manual" ]] && printf 'kindest/node:%s' "$manual"
         return 0
     fi
@@ -375,13 +375,19 @@ function select_node_image {
     printf "%3d. %s\n" "$manual_option" "Enter a tag manually" >&2
 
     while true; do
-        read -rp "Select a version [1-${manual_option}]: " selection
+        if ! read -rp "Select a version [1-${manual_option}]: " selection; then
+            echo "No input (stdin closed); using kind's default Kubernetes version." >&2
+            return 0
+        fi
         if ! [[ "$selection" =~ ^[0-9]+$ ]]; then
             echo "Please enter a number between 1 and ${manual_option}." >&2
             continue
         fi
         if [[ "$selection" -eq "$manual_option" ]]; then
-            read -rp "Enter a kindest/node version tag (e.g. v1.32.2): " manual
+            if ! read -rp "Enter a kindest/node version tag (e.g. v1.32.2): " manual; then
+                echo "No input (stdin closed); using kind's default Kubernetes version." >&2
+                return 0
+            fi
             [[ -n "$manual" ]] && {
                 printf 'kindest/node:%s' "$manual"
                 return 0
@@ -424,7 +430,10 @@ function select_runtime {
         fi
         echo "Both Podman and Docker are available." >&2
         while true; do
-            read -rp "Which runtime should KinD use? [podman/docker] (default=podman): " choice
+            if ! read -rp "Which runtime should KinD use? [podman/docker] (default=podman): " choice; then
+                echo "No input (stdin closed); defaulting to podman." >&2
+                choice="podman"
+            fi
             choice="${choice:-podman}"
             case "$choice" in
                 [Pp]odman | PODMAN)
@@ -926,8 +935,9 @@ function use_existing_podman {
 
         if [[ -n "$ASSUME_YES" ]]; then
             selection=1 # unattended: use the first machine that meets the minimums
-        else
-            read -rp "Enter your choice [1-$exit_option]: " selection
+        elif ! read -rp "Enter your choice [1-$exit_option]: " selection; then
+            echo "No input (stdin closed); aborting machine selection." >&2
+            return 1
         fi
 
         # Check input is numeric

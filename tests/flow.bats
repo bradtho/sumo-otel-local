@@ -130,3 +130,24 @@ setup() {
     run select_runtime
     [ "$status" -eq 0 ]
 }
+
+@test "select_runtime: EOF with both runtimes defaults to podman (no busy-loop)" {
+    printf '#!/usr/bin/env bash\nexit 0\n' >"${BATS_TEST_TMPDIR}/docker"
+    printf '#!/usr/bin/env bash\nexit 0\n' >"${BATS_TEST_TMPDIR}/podman"
+    chmod +x "${BATS_TEST_TMPDIR}/docker" "${BATS_TEST_TMPDIR}/podman"
+    run bash -c 'source "$1"; trap - ERR EXIT; PATH="$2:$PATH"; ASSUME_YES=""
+        select_runtime </dev/null >/dev/null 2>&1; echo "$CONTAINER_RUNTIME"' _ "$SCRIPT" "${BATS_TEST_TMPDIR}"
+    [ "$status" -eq 0 ]
+    [ "$output" = "podman" ]
+}
+
+# --- select_node_image (EOF must not busy-loop) -----------------------------
+
+@test "select_node_image: EOF on the version prompt falls back to kind's default" {
+    # Return a tag list so we enter the numbered-selection loop, then feed EOF.
+    run bash -c 'source "$1"; trap - ERR EXIT
+        curl(){ printf "%s" "{\"results\":[{\"name\":\"v1.32.2\"}]}"; }
+        select_node_image </dev/null 2>/dev/null' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ] # no node image emitted -> caller uses kind's default
+}
