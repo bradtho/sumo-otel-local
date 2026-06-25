@@ -995,7 +995,10 @@ function on_error {
 # Entry point. Enabling strict mode and the ERR trap here (rather than at the top
 # level) keeps the script sourceable by the test suite without side effects.
 function main {
-    set -euo pipefail
+    # -E (errtrace) makes the ERR trap fire for failures inside functions too —
+    # without it on_error would be dead code, since every fallible command runs in a
+    # function. errexit already exits on those failures; -E adds the friendly report.
+    set -Eeuo pipefail
     trap 'on_error ${LINENO}' ERR
 
     # Parse Arguments

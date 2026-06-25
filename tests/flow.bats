@@ -109,6 +109,19 @@ setup() {
     [[ "$output" != *"PLACEHOLDER_ACCESS"* ]]
 }
 
+# --- error handling (errtrace) ----------------------------------------------
+
+@test "on_error fires for a failure inside a function (set -Eeuo / errtrace)" {
+    # Stub helm to fail; running -o reaches `helm repo add` inside ensure_helm_repo.
+    # With errtrace the ERR trap must fire and print on_error's friendly message
+    # (rather than the script dying silently with the raw exit code).
+    printf '#!/usr/bin/env bash\nexit 1\n' >"${BATS_TEST_TMPDIR}/helm"
+    chmod +x "${BATS_TEST_TMPDIR}/helm"
+    run env PATH="${BATS_TEST_TMPDIR}:$PATH" bash "$SCRIPT" -y -o </dev/null
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Error: command failed"* ]]
+}
+
 # --- select_runtime ---------------------------------------------------------
 
 @test "select_runtime: honours a preset CONTAINER_RUNTIME=docker" {

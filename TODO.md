@@ -54,8 +54,9 @@ Python/Go now (see Decisions). Re-evaluate Python (not Go) only when feature pre
 
 ### MEDIUM severity
 
-- [ ] **ERR trap never fires for failures inside functions (missing set -E/errtrace), so on_error is effectively dead code** — `sumo-otel-local.sh:3,881` _(bug, trivial)_
+- [x] **ERR trap never fires for failures inside functions (missing set -E/errtrace), so on_error is effectively dead code** — `sumo-otel-local.sh:3,881` _(bug, trivial)_
   **Fix:** Add `set -Eeuo pipefail` (or a separate `set -o errtrace`) at line 3 so the ERR trap is inherited by functions. Verify with a stub harness that on_error fires when e.g. `kind create cluster` fails inside init_cluster. Note that `$LINENO` inside the trap string will then report the function-internal line, which is the desired behavior.
+  **Done (2026-06-25):** Changed `set -euo pipefail` → `set -Eeuo pipefail` in `main()` (strict mode now lives there since the sourcing-seam change). errexit already exited on these failures; `-E` adds the inherited ERR trap so on_error's friendly message + exit-code propagation actually run. Verified: a stubbed `helm` failing inside `ensure_helm_repo` (via `-o`) now prints "Error: command failed (exit 1) at line 579" and exits non-zero — added as a regression test in `tests/flow.bats` (33 tests green).
 - [ ] **Interactive selection loops spin forever on closed/redirected stdin (EOF)** — `sumo-otel-local.sh:800-824` _(bug, small)_
   **Fix:** Detect read failure (EOF) and abort instead of looping. E.g. change the prompts to `if ! read -rp "..." selection; then echo 'No input (stdin closed); aborting.' >&2; return 1; fi` (or `exit 1` where appropriate). Apply to all three loops. Alternatively bound the retries.
 - [ ] **Multiple action flags run sequentially with no mutual-exclusion guard; contradictory combos partially execute** — `sumo-otel-local.sh:884-934 (arg loop), each action case ends in exit` _(bug, medium)_
