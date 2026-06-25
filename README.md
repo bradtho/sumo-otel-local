@@ -63,9 +63,12 @@ Options:
                   Required for -u/-p under -y; never read from the environment.
 ```
 
-`-y`/`--yes` is a modifier, combine it with an action, e.g. `./sumo-otel-local.sh -y -i`.
-In unattended mode the Sumo credentials **must** come from secret storage or the
-environment (the script will not block on a prompt).
+Exactly one **action** (`-i`/`-n`/`-m`/`-o`/`-p`/`-u`/`-v`) is run per invocation;
+giving two different actions is rejected with a clear error, and `-h`/`--help` always
+wins. `-y`/`--yes` and `-f`/`--force` are **modifiers** and are order-independent —
+combine either with an action in any order, e.g. `./sumo-otel-local.sh -y -i` or
+`./sumo-otel-local.sh -i -y`. In unattended mode the Sumo credentials **must** come from
+secret storage or the environment (the script will not block on a prompt).
 
 ### Destructive teardown requires `--force` when unattended
 
@@ -73,7 +76,7 @@ environment (the script will not block on a prompt).
 stray `ASSUME_YES` (e.g. exported in a shell profile) must never be able to delete a
 cluster, Podman machine, or your stored credentials. To tear down without prompts, pass
 the explicit `-f`/`--force` flag (which, unlike `ASSUME_YES`, is **never** read from the
-environment), placed before the action:
+environment); like `-y`, it can go before or after the action:
 
 ```bash
 ./sumo-otel-local.sh --force -u        # delete the cluster, no prompt

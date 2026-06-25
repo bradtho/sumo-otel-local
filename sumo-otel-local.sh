@@ -1002,6 +1002,17 @@ function on_error {
     exit "${exit_code}"
 }
 
+# Record the CLI action chosen during parsing. Repeating the same action is idempotent;
+# selecting a *different* action flags a conflict. Updates main()'s `action`/`conflict`
+# via bash dynamic scope (this is only ever called from main).
+function set_action {
+    # shellcheck disable=SC2154  # action/conflict are main()'s locals (dynamic scope)
+    if [[ -n "$action" && "$action" != "$1" ]]; then
+        conflict="yes"
+    fi
+    action="$1"
+}
+
 # Entry point. Enabling strict mode and the ERR trap here (rather than at the top
 # level) keeps the script sourceable by the test suite without side effects.
 function main {
@@ -1011,64 +1022,69 @@ function main {
     set -Eeuo pipefail
     trap 'on_error ${LINENO}' ERR
 
-    # Parse Arguments
+    # Parse ALL flags into state first, then dispatch a single action. This keeps the
+    # modifiers (-y/--yes, -f/--force) order-independent. Repeating the same action is
+    # fine; two *different* actions (e.g. `-i -u`) is a clear error instead of the old
+    # silent first-wins. Errors are deferred to after parsing so -h always wins and the
+    # report doesn't depend on token order.
+    local action="" conflict="" show_help="" bad_flag=""
     while [[ $# -gt 0 ]]; do
-        key="$1"
-        case $key in
-            -h | --help)
-                help
-                exit 0
-                ;;
-            -i | --install)
-                install_dependencies
-                init_cluster
-                install_sumo
-                exit 0
-                ;;
-            -n | --init)
-                install_dependencies
-                init_cluster
-                exit 0
-                ;;
-            -m | --helm)
-                install_sumo
-                exit 0
-                ;;
-            -o | --output)
-                output
-                exit 0
-                ;;
-            -p | --purge)
-                purge
-                exit 0
-                ;;
-            -u | --uninstall)
-                uninstall
-                exit 0
-                ;;
-            -v | --version)
-                version
-                exit 0
-                ;;
-            -y | --yes | --non-interactive)
-                # Modifier (not an action): enable unattended mode, then process the
-                # remaining args. Place before the action flag, e.g. `-y -i`.
-                ASSUME_YES="yes"
-                ;;
-            -f | --force)
-                # Modifier (not an action): explicitly confirm destructive teardown
-                # (-u/-p) so it can run without prompting. Place before the action flag,
-                # e.g. `--force -p` or `-y --force -p`.
-                FORCE="yes"
-                ;;
-            *)
-                echo "Invalid Option: $1"
-                help
-                exit 1
-                ;;
+        case "$1" in
+            -h | --help) show_help="yes" ;;
+            -i | --install) set_action install ;;
+            -n | --init) set_action init ;;
+            -m | --helm) set_action helm ;;
+            -o | --output) set_action output ;;
+            -p | --purge) set_action purge ;;
+            -u | --uninstall) set_action uninstall ;;
+            -v | --version) set_action version ;;
+            # Modifiers (not actions): order-independent, may appear before or after.
+            -y | --yes | --non-interactive) ASSUME_YES="yes" ;;
+            -f | --force) FORCE="yes" ;;
+            *) if [[ -z "$bad_flag" ]]; then bad_flag="$1"; fi ;;
         esac
         shift
     done
+
+    # -h/--help always wins: print usage and exit cleanly, before any error.
+    if [[ -n "$show_help" ]]; then
+        help
+        exit 0
+    fi
+
+    if [[ -n "$bad_flag" ]]; then
+        echo "Invalid Option: $bad_flag" >&2
+        help
+        exit 1
+    fi
+
+    if [[ -n "$conflict" ]]; then
+        echo "Specify exactly one action (-i/-n/-m/-o/-p/-u/-v)." >&2
+        help
+        exit 1
+    fi
+
+    case "$action" in
+        install)
+            install_dependencies
+            init_cluster
+            install_sumo
+            ;;
+        init)
+            install_dependencies
+            init_cluster
+            ;;
+        helm) install_sumo ;;
+        output) output ;;
+        purge) purge ;;
+        uninstall) uninstall ;;
+        version) version ;;
+        *)
+            echo "Specify exactly one action (-i/-n/-m/-o/-p/-u/-v), or -h for help." >&2
+            help
+            exit 1
+            ;;
+    esac
 }
 
 # Run main only when executed directly, not when sourced (e.g. by the test suite).
