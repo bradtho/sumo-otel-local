@@ -76,17 +76,24 @@ rules apply once we reach `1.0.0`.
 
 `sumo-otel-local.sh` carries an embedded `VERSION` constant (used by `-v`, which is
 intentionally offline). It must equal the latest release tag **without** the `v`
-prefix — e.g. tag `v0.4.0` ⇒ `VERSION="0.4.0"`. Until release automation lands, a
-release is cut manually:
+prefix — e.g. tag `v0.4.0` ⇒ `VERSION="0.4.0"`.
 
-1. Open a PR whose title bumps appropriately (e.g. `feat: …` for a MINOR) and update
-   `VERSION` in the same PR.
-2. Squash-merge to `main`.
-3. Tag `vX.Y.Z` on `main` and publish a GitHub Release with generated notes.
+Releases are automated with **release-please** (`.github/workflows/release-please.yml`):
+on each push to `main` it derives the next version + `CHANGELOG.md` from the merged
+Conventional-Commit (PR-title) subjects, and maintains a "release PR". Merging that PR
+tags `vX.Y.Z`, publishes a GitHub Release, and rewrites the `VERSION` line (annotated
+`# x-release-please-version`) — so adherence to the commit convention above is what
+drives it. You normally never bump `VERSION` by hand.
 
-Once the release-automation item is done, a tool (e.g. `release-please` or
-`git-cliff` + a tag workflow) will derive the bump and notes from the merged commit
-subjects, so adherence to the convention above is what makes that possible.
+**Release baseline:** release-please uses the latest `vX.Y.Z` **git tag** as the
+"last release" it diffs from — currently `v0.4.0` (commit `a0d096d`, where the 0.4.0
+GitHub Release was cut), matching `.release-please-manifest.json` (`0.4.0`). The config
+intentionally sets **no** `last-release-sha`: a static SHA would go stale after the
+first managed release (re-including already-released commits), whereas tag-based
+detection advances automatically as each `vX.Y.Z` is tagged. To sanity-check what
+release-please would do, trigger the workflow via **`workflow_dispatch`** and inspect
+the proposed release PR before merging it (a release PR is non-destructive — nothing is
+tagged or published until it is merged).
 
 ## Bumping the pinned Sumo Logic chart version
 
