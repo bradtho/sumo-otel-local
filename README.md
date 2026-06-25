@@ -86,6 +86,23 @@ environment); like `-y`, it can go before or after the action:
 Without `--force`, `-y -p` refuses and exits non-zero. Run `-u`/`-p` with no flags for
 the normal interactive confirm + type-the-cluster-name guard.
 
+## Checking status
+
+`-s`/`--status` is a **read-only** doctor command — it changes nothing and reports:
+
+- the selected container runtime + KinD provider;
+- on macOS with Podman, the Podman machine(s) and their running state;
+- whether the KinD cluster exists (prompts for the name, default `sumo`);
+- the Sumo collector Helm release (`helm status sumologic -n sumologic`); and
+- the collector pods (`kubectl get pods -n sumologic`).
+
+```bash
+./sumo-otel-local.sh -s
+```
+
+Every probe is non-fatal: a missing runtime, cluster, release, pod, or CLI tool is
+reported as "not found"/"not installed" rather than erroring out.
+
 ## Configuration
 
 The script reads a few environment variables; all are optional.

@@ -36,15 +36,16 @@ flow and `exit`s; `-y`/`--yes`/`--non-interactive` is a **modifier** (sets
 `ASSUME_YES`, then falls through to process the action), so it goes before the action,
 e.g. `-y -i`.
 
-| Flag           | Flow (functions called)                                  |
-| -------------- | -------------------------------------------------------- |
-| `-i/--install` | `install_dependencies` → `init_cluster` → `install_sumo` |
-| `-n/--init`    | `install_dependencies` → `init_cluster`                  |
-| `-m/--helm`    | `install_sumo` (existing cluster)                        |
-| `-o/--output`  | `output` (renders manifests via `helm template`)         |
-| `-u/--uninstall` | `uninstall` (deletes the cluster)                      |
-| `-p/--purge`   | `purge` (cluster + Podman machine on macOS + secrets)    |
-| `-v/--version` | `version` (offline; prints `VERSION`)                    |
+| Flag             | Flow (functions called)                                  |
+| ---------------- | -------------------------------------------------------- |
+| `-i/--install`   | `install_dependencies` → `init_cluster` → `install_sumo` |
+| `-n/--init`      | `install_dependencies` → `init_cluster`                  |
+| `-m/--helm`      | `install_sumo` (existing cluster)                        |
+| `-o/--output`    | `output` (renders manifests via `helm template`)         |
+| `-s/--status`    | `status` (read-only doctor; all probes non-fatal)        |
+| `-u/--uninstall` | `uninstall` (deletes the cluster)                        |
+| `-p/--purge`     | `purge` (cluster + Podman machine on macOS + secrets)    |
+| `-v/--version`   | `version` (offline; prints `VERSION`)                    |
 
 Key helper groups:
 

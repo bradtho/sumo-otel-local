@@ -109,6 +109,49 @@ setup() {
     [[ "$output" != *"PLACEHOLDER_ACCESS"* ]]
 }
 
+# --- status (read-only doctor; every probe must be non-fatal under errexit) -
+
+# Run status() the way main does — under `set -Eeuo pipefail` with the ERR trap — but
+# with a sentinel trap so we can assert the trap never fires. $1 = extra stub defs
+# (passed as $2 to the inner shell; keep stub bodies free of positional params).
+run_status() {
+    run bash -c 'source "$1"
+        set -Eeuo pipefail
+        trap "echo TRAP_FIRED" ERR
+        ASSUME_YES=yes
+        eval "$2"
+        status' _ "$SCRIPT" "$1"
+}
+
+@test "status: no container runtime reports cleanly (exit 0, no ERR trap)" {
+    run_status 'select_runtime(){ return 1; }'
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"TRAP_FIRED"* ]]
+    [[ "$output" == *"none found"* ]]
+}
+
+@test "status: absent cluster reports 'not found' (exit 0, no ERR trap)" {
+    run_status 'select_runtime(){ CONTAINER_RUNTIME=docker; return 0; }; set_kind_provider(){ :; }; kind(){ :; }; cluster_exists(){ return 1; }'
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"TRAP_FIRED"* ]]
+    [[ "$output" == *"not found"* ]]
+}
+
+@test "status: failing helm/kubectl probes stay non-fatal (exit 0, no ERR trap)" {
+    run_status 'select_runtime(){ CONTAINER_RUNTIME=docker; return 0; }; set_kind_provider(){ :; }; kind(){ :; }; cluster_exists(){ return 0; }; helm(){ return 1; }; kubectl(){ return 1; }'
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"TRAP_FIRED"* ]]
+    [[ "$output" == *"not installed"* ]]
+    [[ "$output" == *"could not list pods"* ]]
+}
+
+@test "status: reports release + pods when present (exit 0)" {
+    run_status 'select_runtime(){ CONTAINER_RUNTIME=docker; return 0; }; set_kind_provider(){ :; }; kind(){ :; }; cluster_exists(){ return 0; }; helm(){ echo "NAME: sumologic"; echo "STATUS: deployed"; }; kubectl(){ echo "sumo-otelcol-0 1/1 Running"; }'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"STATUS: deployed"* ]]
+    [[ "$output" == *"Running"* ]]
+}
+
 # --- error handling (errtrace) ----------------------------------------------
 
 @test "on_error fires for a failure inside a function (set -Eeuo / errtrace)" {

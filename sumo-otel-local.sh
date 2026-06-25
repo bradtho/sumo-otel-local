@@ -13,6 +13,7 @@ function help {
     echo "  -n, --init      Install dependencies without setting up the Sumo Operator."
     echo "  -m, --helm      Install Sumo Operator onto existing cluster."
     echo "  -o, --output    Output the rendered Kubernetes manifest YAML file."
+    echo "  -s, --status    Report cluster and collector health (read-only)."
     echo "  -p, --purge     Uninstall the cluster (and, with Podman on macOS, the Podman machine)."
     echo "  -u, --uninstall Uninstall the Cluster only."
     echo "  -v, --version   Display the version of the script."
@@ -904,6 +905,78 @@ function version {
     echo "sumo-otel-local ${VERSION}"
 }
 
+# Report the health of the local setup: container runtime, Podman machine (macOS),
+# the KinD cluster, the Sumo collector Helm release, and its pods. This is a read-only
+# doctor command: EVERY probe is non-fatal (guarded so a missing piece reports
+# "not found" rather than tripping errexit / the ERR trap), and missing tools are
+# reported rather than fatal.
+function status {
+    echo "== sumo-otel-local status =="
+
+    # Container runtime + KinD provider.
+    if select_runtime; then
+        set_kind_provider
+        echo "Container runtime: ${CONTAINER_RUNTIME} (KIND_EXPERIMENTAL_PROVIDER=${KIND_EXPERIMENTAL_PROVIDER:-})"
+    else
+        echo "Container runtime: none found — install Docker or Podman."
+        return 0
+    fi
+
+    # Podman machine (macOS only).
+    if [[ "$CONTAINER_RUNTIME" == "podman" && "$OS" == "darwin" ]]; then
+        if command -v jq &>/dev/null; then
+            local machines
+            machines=$(podman machine list --format json 2>/dev/null || true)
+            if [[ -n "$machines" && "$machines" != "[]" ]]; then
+                echo "Podman machines:"
+                printf '%s' "$machines" |
+                    jq -r '.[] | "  - \(.Name): running=\(.Running), memory=\(.Memory), cpus=\(.CPUs)"' 2>/dev/null ||
+                    echo "  (could not parse machine list)"
+            else
+                echo "Podman machines: none (run -n/--init to create one)."
+            fi
+        else
+            echo "Podman machines: jq not installed; skipping."
+        fi
+    fi
+
+    # KinD cluster.
+    local cluster_name
+    cluster_name=$(ask "Cluster name to check [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
+    if ! command -v kind &>/dev/null; then
+        echo "Cluster '${cluster_name}': kind not installed; cannot check."
+        return 0
+    fi
+    if cluster_exists "$cluster_name"; then
+        echo "Cluster '${cluster_name}': present."
+    else
+        echo "Cluster '${cluster_name}': not found (run -i/--install or -n/--init)."
+        return 0
+    fi
+
+    # Sumo collector Helm release.
+    if command -v helm &>/dev/null; then
+        if helm status sumologic --namespace sumologic >/dev/null 2>&1; then
+            echo "Helm release 'sumologic' (namespace sumologic):"
+            helm status sumologic --namespace sumologic 2>/dev/null |
+                grep -E '^(NAME|NAMESPACE|STATUS|REVISION|LAST DEPLOYED):' | sed 's/^/  /' || true
+        else
+            echo "Helm release 'sumologic': not installed (run -m/--helm or -i/--install)."
+        fi
+    else
+        echo "Helm release: helm not installed; skipping."
+    fi
+
+    # Collector pods.
+    if command -v kubectl &>/dev/null; then
+        echo "Pods (namespace sumologic):"
+        kubectl --context "kind-${cluster_name}" get pods -n sumologic 2>/dev/null | sed 's/^/  /' ||
+            echo "  could not list pods (cluster unreachable or namespace absent)."
+    else
+        echo "Pods: kubectl not installed; skipping."
+    fi
+}
+
 ## Helper Functions
 
 # Normalize a `podman machine` Memory value to MiB. Podman has reported this field
@@ -1117,6 +1190,7 @@ function main {
             -n | --init) set_action init ;;
             -m | --helm) set_action helm ;;
             -o | --output) set_action output ;;
+            -s | --status) set_action status ;;
             -p | --purge) set_action purge ;;
             -u | --uninstall) set_action uninstall ;;
             -v | --version) set_action version ;;
@@ -1141,7 +1215,7 @@ function main {
     fi
 
     if [[ -n "$conflict" ]]; then
-        echo "Specify exactly one action (-i/-n/-m/-o/-p/-u/-v)." >&2
+        echo "Specify exactly one action (-i/-n/-m/-o/-s/-p/-u/-v)." >&2
         help
         exit 1
     fi
@@ -1158,11 +1232,12 @@ function main {
             ;;
         helm) install_sumo ;;
         output) output ;;
+        status) status ;;
         purge) purge ;;
         uninstall) uninstall ;;
         version) version ;;
         *)
-            echo "Specify exactly one action (-i/-n/-m/-o/-p/-u/-v), or -h for help." >&2
+            echo "Specify exactly one action (-i/-n/-m/-o/-s/-p/-u/-v), or -h for help." >&2
             help
             exit 1
             ;;

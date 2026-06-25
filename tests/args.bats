@@ -13,7 +13,7 @@ setup() {
 STUBS='install_dependencies(){ echo "DEPS_RAN"; }; init_cluster(){ echo "INIT_RAN"; }
        install_sumo(){ echo "SUMO_RAN y=$ASSUME_YES f=$FORCE"; }
        output(){ echo "OUTPUT_RAN"; }; purge(){ echo "PURGE_RAN f=$FORCE"; }
-       uninstall(){ echo "UNINSTALL_RAN f=$FORCE"; }'
+       uninstall(){ echo "UNINSTALL_RAN f=$FORCE"; }; status(){ echo "STATUS_RAN"; }'
 
 # run_main <args...> : source the script, install stubs, then run main with the args.
 run_main() {
@@ -26,6 +26,12 @@ run_main() {
     [[ "$output" == *"DEPS_RAN"* ]]
     [[ "$output" == *"INIT_RAN"* ]]
     [[ "$output" == *"SUMO_RAN"* ]]
+}
+
+@test "-s/--status dispatches the status action" {
+    run_main -s
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"STATUS_RAN"* ]]
 }
 
 @test "-n dispatches init only (no install_sumo)" {
