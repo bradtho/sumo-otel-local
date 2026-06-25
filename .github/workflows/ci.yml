@@ -34,15 +34,18 @@ jobs:
         shell: bash
         run: |
           SHFMT_VERSION=v3.13.1
+          # shfmt publishes no checksum file, so the per-asset SHA-256 digests are
+          # pinned here and verified before the binary is placed on PATH.
           case "${{ runner.os }}-${{ runner.arch }}" in
-            Linux-X64)    asset=linux_amd64 ;;
-            Linux-ARM64)  asset=linux_arm64 ;;
-            macOS-ARM64)  asset=darwin_arm64 ;;
-            macOS-X64)    asset=darwin_amd64 ;;
+            Linux-X64)    asset=linux_amd64;  sha=fb096c5d1ac6beabbdbaa2874d025badb03ee07929f0c9ff67563ce8c75398b1 ;;
+            Linux-ARM64)  asset=linux_arm64;  sha=32d92acaa5cd8abb29fc49dac123dc412442d5713967819d8af2c29f1b3857c7 ;;
+            macOS-ARM64)  asset=darwin_arm64; sha=9680526be4a66ea1ffe988ed08af58e1400fe1e4f4aef5bd88b20bb9b3da33f8 ;;
+            macOS-X64)    asset=darwin_amd64; sha=6feedafc72915794163114f512348e2437d080d0047ef8b8fa2ec63b575f12af ;;
             *) echo "Unsupported runner: ${{ runner.os }}-${{ runner.arch }}"; exit 1 ;;
           esac
           curl -fsSL -o /tmp/shfmt \
             "https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_${asset}"
+          echo "${sha}  /tmp/shfmt" | shasum -a 256 -c -
           chmod +x /tmp/shfmt
           sudo mv /tmp/shfmt /usr/local/bin/shfmt
 
@@ -103,8 +106,11 @@ jobs:
       - name: Install kubeconform
         run: |
           KUBECONFORM_VERSION=v0.7.0
-          curl -fsSL -o /tmp/kubeconform.tar.gz \
-            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          base="https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}"
+          curl -fsSL -o /tmp/kubeconform.tar.gz "${base}/kubeconform-linux-amd64.tar.gz"
+          # Verify against the release's published CHECKSUMS before extracting.
+          expected=$(curl -fsSL "${base}/CHECKSUMS" | awk '$2=="kubeconform-linux-amd64.tar.gz"{print $1}')
+          echo "${expected}  /tmp/kubeconform.tar.gz" | sha256sum -c -
           tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
           sudo mv /tmp/kubeconform /usr/local/bin/kubeconform
           kubeconform -v

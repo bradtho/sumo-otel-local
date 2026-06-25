@@ -203,6 +203,51 @@ function install_binary {
     echo "Installed $name to $dir"
 }
 
+# Compute the SHA-256 of file $1 (hex, lowercase), using whichever tool is present.
+function sha256_of {
+    if command -v sha256sum &>/dev/null; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum &>/dev/null; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        echo "Error: need 'sha256sum' or 'shasum' to verify downloads; refusing to continue." >&2
+        exit 1
+    fi
+}
+
+# Echo the expected SHA-256 from a remote checksum file at $1. With a filename in $2,
+# select that file's line from a multi-entry list ("<hash>  <file>", tolerating a
+# leading '*'); without $2, use the first line (per-asset .sha256/.sha256sum files).
+function remote_sha256 {
+    local url=$1 name=${2:-}
+    if [[ -n "$name" ]]; then
+        curl -fsSL "$url" | awk -v n="$name" '{f=$2; sub(/^[*]/, "", f); if (f == n) {print $1; exit}}'
+    else
+        curl -fsSL "$url" | awk 'NR==1 {print $1; exit}'
+    fi
+}
+
+# Verify that file $1 matches the expected hex digest $2; abort (and delete the file)
+# on mismatch or when no expected digest is available (fail closed). $3 = label.
+function verify_sha256 {
+    local file=$1 expected=$2 label=${3:-$1} actual
+    expected=$(printf '%s' "$expected" | tr 'A-F' 'a-f')
+    if [[ -z "$expected" ]]; then
+        echo "Error: could not obtain a checksum for ${label}; refusing to install an unverified binary." >&2
+        rm -f "$file"
+        exit 1
+    fi
+    actual=$(sha256_of "$file" | tr 'A-F' 'a-f')
+    if [[ "$actual" != "$expected" ]]; then
+        echo "Error: SHA-256 mismatch for ${label} (${file})." >&2
+        echo "  expected: ${expected}" >&2
+        echo "  actual:   ${actual}" >&2
+        rm -f "$file"
+        exit 1
+    fi
+    echo "Verified ${label} checksum." >&2
+}
+
 # Check Dependencies
 function install_dependencies {
 
@@ -223,22 +268,29 @@ function install_dependencies {
             install_dependencies
         else
             echo "Installing Dependencies Directly..."
-            local release
+            local release jq_base kver
             if ! command -v jq &>/dev/null; then
                 echo "Installing jq..."
-                curl -fsSL -o /tmp/jq "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-${JQ_OS}-${ARCH}"
+                jq_base="https://github.com/jqlang/jq/releases/download/jq-1.7.1"
+                curl -fsSL -o /tmp/jq "${jq_base}/jq-${JQ_OS}-${ARCH}"
+                verify_sha256 /tmp/jq "$(remote_sha256 "${jq_base}/sha256sum.txt" "jq-${JQ_OS}-${ARCH}")" jq
                 install_binary /tmp/jq jq
             fi
 
             if ! command -v kubectl &>/dev/null; then
                 echo "Installing Kubectl..."
-                curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/${OS}/${ARCH}/kubectl"
+                kver=$(curl -fsSL https://dl.k8s.io/release/stable.txt)
+                curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/${kver}/bin/${OS}/${ARCH}/kubectl"
+                verify_sha256 /tmp/kubectl "$(remote_sha256 "https://dl.k8s.io/release/${kver}/bin/${OS}/${ARCH}/kubectl.sha256")" kubectl
                 install_binary /tmp/kubectl kubectl
                 kubectl version --client
             fi
 
             if ! command -v helm &>/dev/null; then
                 echo "Installing Helm..."
+                # get-helm-3 verifies the downloaded helm tarball against its published
+                # SHA-256 itself, so the binary is checksum-checked. (The script is
+                # fetched from a mutable master ref — pinning that is a separate item.)
                 curl -fsSL -o /tmp/get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
                 chmod 700 /tmp/get_helm.sh
                 /tmp/get_helm.sh
@@ -251,6 +303,7 @@ function install_dependencies {
                 if [[ "$OS" == "darwin" ]]; then
                     release=$(curl -fsSL https://api.github.com/repos/containers/podman/releases/latest | jq -r .tag_name)
                     curl -fsSL -o /tmp/podman.zip "https://github.com/containers/podman/releases/download/${release}/podman-remote-release-darwin_${ARCH}.zip"
+                    verify_sha256 /tmp/podman.zip "$(remote_sha256 "https://github.com/containers/podman/releases/download/${release}/shasums" "podman-remote-release-darwin_${ARCH}.zip")" podman
                     rm -rf /tmp/podman-extract
                     unzip -q /tmp/podman.zip -d /tmp/podman-extract
                     install_binary "/tmp/podman-extract/podman-${release}/usr/bin/podman" podman
@@ -272,6 +325,7 @@ function install_dependencies {
                 echo "Installing Kind..."
                 release=$(curl -fsSL https://api.github.com/repos/kubernetes-sigs/kind/releases/latest | jq -r .tag_name)
                 curl -fsSL -o /tmp/kind "https://kind.sigs.k8s.io/dl/${release}/kind-${OS}-${ARCH}"
+                verify_sha256 /tmp/kind "$(remote_sha256 "https://github.com/kubernetes-sigs/kind/releases/download/${release}/kind-${OS}-${ARCH}.sha256sum" "kind-${OS}-${ARCH}")" kind
                 install_binary /tmp/kind kind
             fi
         fi
