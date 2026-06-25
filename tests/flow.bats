@@ -95,9 +95,13 @@ setup() {
 }
 
 @test "output: mirrors install (version + clusterName + overrides) with placeholder creds off-argv" {
-    run bash -c 'source "$1"; require_cmd(){ :;}; ensure_helm_repo(){ :;}; tee(){ cat >/dev/null;}
-        helm(){ printf "HELM %s\n" "$*"; }; ASSUME_YES=yes; output' _ "$SCRIPT"
+    # Capture helm's argv to a file (via a closure) so the assertion doesn't depend on
+    # the `helm | tee` pipe's stdout, which behaves differently across platforms.
+    local cap="${BATS_TEST_TMPDIR}/helm_args"
+    run bash -c 'source "$1"; cap="$2"; require_cmd(){ :;}; ensure_helm_repo(){ :;}; tee(){ cat >/dev/null;}
+        helm(){ printf "%s\n" "$*" >"$cap"; }; ASSUME_YES=yes; output' _ "$SCRIPT" "$cap"
     [ "$status" -eq 0 ]
+    run cat "$cap"
     [[ "$output" == *"template sumologic sumologic/sumologic"* ]]
     [[ "$output" == *"--version 5.2.0"* ]]
     [[ "$output" == *"sumologic.clusterName=sumo"* ]]
