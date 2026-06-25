@@ -88,6 +88,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Single source of truth: derive the pinned chart version from the script's
+      # SUMO_CHART_VERSION default so CI validates exactly the version users deploy.
+      - name: Resolve pinned chart version
+        run: |
+          ver=$(sed -n 's/.*SUMO_CHART_VERSION:-\([0-9.][0-9.]*\)}.*/\1/p' sumo-otel-local.sh)
+          if [[ -z "$ver" ]]; then echo "Could not parse SUMO_CHART_VERSION from sumo-otel-local.sh"; exit 1; fi
+          echo "CHART_VERSION=$ver" >> "$GITHUB_ENV"
+          echo "Pinned sumologic chart version: $ver"
+
       - name: Install Helm
         uses: azure/setup-helm@v4
 
@@ -130,7 +139,7 @@ jobs:
           fail=0
           for vf in values.yaml examples/*.yaml; do
             echo "::group::render $vf"
-            if helm template sumologic "$CHART" "${common_flags[@]}" -f "$vf" > "/tmp/rendered.yaml"; then
+            if helm template sumologic "$CHART" --version "$CHART_VERSION" "${common_flags[@]}" -f "$vf" > "/tmp/rendered.yaml"; then
               docs=$(grep -c '^kind:' /tmp/rendered.yaml || true)
               if [[ "$docs" -lt 1 ]]; then
                 echo "::error file=$vf::rendered 0 manifests"
@@ -161,7 +170,7 @@ jobs:
           # output (applying the full render would create resources, defeating the
           # dry-run). --server-side avoids the "annotations too long" client-side
           # limit the large prometheus-operator CRDs hit.
-          helm template sumologic "$CHART" --namespace "$NS" --include-crds \
+          helm template sumologic "$CHART" --version "$CHART_VERSION" --namespace "$NS" --include-crds \
             -f /tmp/ci-creds.yaml --set-string sumologic.clusterName=ci-test \
             | awk '
                 function flush() { if (isCRD && buf != "") printf "---\n%s", buf; buf=""; isCRD=0 }
@@ -185,7 +194,7 @@ jobs:
           fail=0
           for vf in values.yaml examples/*.yaml; do
             echo "::group::dry-run $vf"
-            if ! helm install sumologic "$CHART" --dry-run=server "${common_flags[@]}" -f "$vf" >/dev/null; then
+            if ! helm install sumologic "$CHART" --version "$CHART_VERSION" --dry-run=server "${common_flags[@]}" -f "$vf" >/dev/null; then
               echo "::error file=$vf::server-side dry-run failed"
               fail=1
             else

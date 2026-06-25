@@ -87,3 +87,21 @@ release is cut manually:
 Once the release-automation item is done, a tool (e.g. `release-please` or
 `git-cliff` + a tag workflow) will derive the bump and notes from the merged commit
 subjects, so adherence to the convention above is what makes that possible.
+
+## Bumping the pinned Sumo Logic chart version
+
+`sumo-otel-local.sh` pins the `sumologic/sumologic` chart via the
+`SUMO_CHART_VERSION` constant (install, `-o`/--output, and CI all use it; CI derives
+it from the script, so there is a single source of truth). It is pinned because the
+chart is otherwise mutable and a v5 breaking change has already silently broken
+example values. To bump it:
+
+1. Change the `SUMO_CHART_VERSION` default in `sumo-otel-local.sh`.
+2. Re-render the bundled values against the new chart — CI's `mock-deploy` job does
+   exactly this (`helm template` + `kubeconform` for `values.yaml` and every
+   `examples/*.yaml`, then a KinD server-side dry-run). Locally:
+   `helm template sumologic sumologic/sumologic --version <new> -f examples/<file> …`.
+3. Fix any `examples/*.yaml` / `values.yaml` that the new chart rejects (a v4→v5 bump,
+   for instance, removed the `kube-prometheus-stack.*.enabled` toggles).
+4. Open the change as a `fix:`/`feat:` PR if it affects what users deploy; CI must be
+   green (it validates the new pinned version) before merge.

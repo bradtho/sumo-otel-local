@@ -73,6 +73,14 @@ CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-}"
 # Helm repository for the Sumo Logic collection.
 SUMO_HELM_REPO_URL="https://sumologic.github.io/sumologic-kubernetes-collection"
 
+# Pinned sumologic/sumologic chart version. The chart is otherwise mutable ("latest"),
+# and a v5 breaking change has already silently broken example values — so install,
+# `output`, and CI all pin this exact version for reproducibility. CI validates the
+# pinned version, so what CI proves is what users deploy. Override deliberately with
+# SUMO_CHART_VERSION=<x.y.z> to try a newer chart. To bump: change this default, re-run
+# the examples through `helm template` (CI's mock-deploy does this), and update docs.
+SUMO_CHART_VERSION="${SUMO_CHART_VERSION:-5.2.0}"
+
 # Script version. Kept in sync with the published GitHub Release tag; printed by
 # -v/--version without any network calls. The trailing annotation lets
 # release-please rewrite this line automatically when it cuts a release.
@@ -628,6 +636,7 @@ EOF
 
     # Build the helm args; only include the user values file when one is in use.
     local helm_args=(upgrade --install sumologic sumologic/sumologic
+        --version "$SUMO_CHART_VERSION"
         --namespace=sumologic --create-namespace)
     [[ -n "$HELM_VALUES" ]] && helm_args+=(--values "$HELM_VALUES")
     helm_args+=(--values "$secrets_file")
@@ -657,7 +666,7 @@ function output {
     # Only pass -f when a values file is in use; the chart renders with defaults otherwise.
     local template_args=(template --namespace=sumologic --create-namespace)
     [[ -n "$HELM_VALUES" ]] && template_args+=(-f "$HELM_VALUES")
-    template_args+=(sumologic sumologic/sumologic)
+    template_args+=(sumologic sumologic/sumologic --version "$SUMO_CHART_VERSION")
 
     helm "${template_args[@]}" | tee "${K8S_YAML}"
 }

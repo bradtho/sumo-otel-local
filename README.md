@@ -94,6 +94,10 @@ The script reads a few environment variables; all are optional.
   also the size of a newly-created Podman machine.
 - **`MIN_CPU`** (default: `4`) — minimum vCPUs the runtime/VM must have.
 - **`ASSUME_YES`** (default: _unset_) — any non-empty value runs unattended (same as `-y`).
+- **`SUMO_CHART_VERSION`** (default: pinned in the script) — the `sumologic/sumologic`
+  chart version that install and `-o`/--output use. Pinned for reproducibility (CI
+  validates the pinned version); override to try a newer chart, e.g.
+  `SUMO_CHART_VERSION=5.3.0`.
 - **`SUMOLOGIC_ACCESS_ID`** / **`SUMOLOGIC_ACCESS_KEY`** (default: _unset_) — your Sumo
   credentials, used when no secret backend is available (see below).
 
