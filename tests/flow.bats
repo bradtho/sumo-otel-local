@@ -141,6 +141,41 @@ setup() {
     [ "$output" = "podman" ]
 }
 
+# --- select_chart_version ---------------------------------------------------
+
+# helm stub emitting a `helm search repo --versions` style table (with an unrelated
+# sub-chart row that must be filtered out by the $1=="sumologic/sumologic" match).
+CHART_STUB='helm(){ printf "%s\n" "NAME CHART_VERSION APP_VERSION DESC" "sumologic/sumologic 5.2.0 5.2.0 x" "sumologic/sumologic 5.1.1 5.1.1 x" "sumologic/sumologic-fluentd 1.0.0 1 x"; }'
+
+@test "select_chart_version: unattended returns the pinned default (no prompt)" {
+    run bash -c "source \"\$1\"; trap - ERR EXIT; $CHART_STUB; ASSUME_YES=yes; select_chart_version 2>/dev/null" _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ "$output" = "5.2.0" ]
+}
+
+@test "select_chart_version: env-pinned returns that version without prompting" {
+    run bash -c "source \"\$1\"; trap - ERR EXIT; $CHART_STUB; ASSUME_YES=''; CHART_VERSION_FROM_ENV=yes; SUMO_CHART_VERSION=5.1.0; select_chart_version 2>/dev/null" _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ "$output" = "5.1.0" ]
+}
+
+@test "select_chart_version: picking from the list returns that version (sub-chart filtered out)" {
+    run bash -c "source \"\$1\"; trap - ERR EXIT; $CHART_STUB; ASSUME_YES=''; CHART_VERSION_FROM_ENV=''; printf '2\n' | select_chart_version 2>/dev/null" _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ "$output" = "5.1.1" ]
+}
+
+@test "select_chart_version: blank selection uses the pinned default" {
+    run bash -c "source \"\$1\"; trap - ERR EXIT; $CHART_STUB; ASSUME_YES=''; CHART_VERSION_FROM_ENV=''; printf '\n' | select_chart_version 2>/dev/null" _ "$SCRIPT"
+    [ "$output" = "5.2.0" ]
+}
+
+@test "select_chart_version: EOF on the prompt falls back to the pinned default" {
+    run bash -c "source \"\$1\"; trap - ERR EXIT; $CHART_STUB; ASSUME_YES=''; CHART_VERSION_FROM_ENV=''; select_chart_version </dev/null 2>/dev/null" _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ "$output" = "5.2.0" ]
+}
+
 # --- select_node_image (EOF must not busy-loop) -----------------------------
 
 @test "select_node_image: EOF on the version prompt falls back to kind's default" {

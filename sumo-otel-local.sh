@@ -81,6 +81,13 @@ SUMO_HELM_REPO_URL="https://sumologic.github.io/sumologic-kubernetes-collection"
 # pinned version, so what CI proves is what users deploy. Override deliberately with
 # SUMO_CHART_VERSION=<x.y.z> to try a newer chart. To bump: change this default, re-run
 # the examples through `helm template` (CI's mock-deploy does this), and update docs.
+# When set in the environment it is used as-is (no prompt); otherwise install/output
+# offer an interactive picker (select_chart_version) defaulting to this value.
+if [[ -n "${SUMO_CHART_VERSION+x}" ]]; then
+    CHART_VERSION_FROM_ENV="yes"
+else
+    CHART_VERSION_FROM_ENV=""
+fi
 SUMO_CHART_VERSION="${SUMO_CHART_VERSION:-5.2.0}"
 
 # Script version. Kept in sync with the published GitHub Release tag; printed by
@@ -402,6 +409,71 @@ function select_node_image {
     done
 }
 
+# Prompt for a sumologic/sumologic chart version and echo the chosen version to stdout
+# (all UI goes to stderr, so the result is safe to capture with $(...)). Defaults to the
+# pinned SUMO_CHART_VERSION. Returns that default WITHOUT prompting when unattended
+# (ASSUME_YES) or when the version was pinned via the environment. Requires the helm repo
+# to be registered (call after ensure_helm_repo).
+function select_chart_version {
+    local default="$SUMO_CHART_VERSION" versions=() v i selection manual
+    if [[ -n "$ASSUME_YES" || -n "$CHART_VERSION_FROM_ENV" ]]; then
+        printf '%s' "$default"
+        return 0
+    fi
+
+    echo "Fetching available sumologic/sumologic chart versions..." >&2
+    while IFS= read -r v; do
+        [[ -n "$v" ]] && versions+=("$v")
+    done < <(helm search repo sumologic/sumologic --versions 2>/dev/null |
+        awk '$1 == "sumologic/sumologic" {print $2}' | head -n 20)
+
+    if [[ ${#versions[@]} -eq 0 ]]; then
+        echo "Could not list chart versions; using the pinned default ${default}." >&2
+        printf '%s' "$default"
+        return 0
+    fi
+
+    echo "Available sumologic/sumologic chart versions (newest first):" >&2
+    for i in "${!versions[@]}"; do
+        printf "%3d. %s\n" "$((i + 1))" "${versions[$i]}" >&2
+    done
+    local manual_option=$((${#versions[@]} + 1))
+    printf "%3d. %s\n" "$manual_option" "Enter a version manually" >&2
+
+    while true; do
+        if ! read -rp "Select a version [1-${manual_option}, blank=${default}]: " selection; then
+            echo "No input (stdin closed); using the pinned default ${default}." >&2
+            printf '%s' "$default"
+            return 0
+        fi
+        if [[ -z "$selection" ]]; then
+            printf '%s' "$default"
+            return 0
+        fi
+        if ! [[ "$selection" =~ ^[0-9]+$ ]]; then
+            echo "Please enter a number between 1 and ${manual_option}." >&2
+            continue
+        fi
+        if [[ "$selection" -eq "$manual_option" ]]; then
+            if ! read -rp "Enter a chart version (e.g. 5.2.0): " manual; then
+                echo "No input (stdin closed); using the pinned default ${default}." >&2
+                printf '%s' "$default"
+                return 0
+            fi
+            [[ -n "$manual" ]] && {
+                printf '%s' "$manual"
+                return 0
+            }
+            continue
+        fi
+        if [[ "$selection" -ge 1 && "$selection" -le ${#versions[@]} ]]; then
+            printf '%s' "${versions[$((selection - 1))]}"
+            return 0
+        fi
+        echo "Invalid selection: enter a number between 1 and ${manual_option}." >&2
+    done
+}
+
 # --- Container runtime (Podman and Docker are both first-class) ---------------
 
 # Select the container runtime into CONTAINER_RUNTIME. Prompts only when both are
@@ -697,6 +769,12 @@ function install_sumo {
         echo "Skipping repo index update."
     fi
 
+    # Resolve the chart version (pinned default, env override, or interactive pick) and
+    # report it so the run is reproducible.
+    local chart_version
+    chart_version=$(select_chart_version)
+    echo "Using sumologic/sumologic chart version: ${chart_version}"
+
     # Pass the credentials via a private temp values file instead of on the command
     # line, where --set-string would expose them in the process list (ps/argv).
     secrets_file=$(mktemp)
@@ -711,7 +789,7 @@ EOF
 
     # Build the helm args; only include the user values file when one is in use.
     local helm_args=(upgrade --install sumologic sumologic/sumologic
-        --version "$SUMO_CHART_VERSION"
+        --version "$chart_version"
         --namespace=sumologic --create-namespace)
     [[ -n "$HELM_VALUES" ]] && helm_args+=(--values "$HELM_VALUES")
     helm_args+=(--values "$secrets_file")
@@ -737,6 +815,9 @@ function output {
     # The chart is referenced as sumologic/sumologic, so the repo must be registered.
     ensure_helm_repo
 
+    local chart_version
+    chart_version=$(select_chart_version)
+
     # The chart requires accessId/accessKey to render. Use PLACEHOLDER credentials so
     # the rendered manifest is faithful in structure without writing real secrets to the
     # output file; deploy with -i/-m, which inject real credentials securely. Placeholders
@@ -753,7 +834,7 @@ EOF
     # Mirror install_sumo's args so the rendered manifest matches what -i/-m deploys:
     # optional user values, then placeholder creds, clusterName, and the shared overrides.
     local template_args=(template sumologic sumologic/sumologic
-        --version "$SUMO_CHART_VERSION"
+        --version "$chart_version"
         --namespace=sumologic --create-namespace)
     [[ -n "$HELM_VALUES" ]] && template_args+=(--values "$HELM_VALUES")
     template_args+=(--values "$secrets_file")
@@ -761,6 +842,7 @@ EOF
     template_args+=("${SUMO_COMMON_SET[@]}")
 
     helm "${template_args[@]}" | tee "${K8S_YAML}"
+    echo "Rendered sumologic/sumologic chart version ${chart_version} to ${K8S_YAML}." >&2
     echo "Note: the rendered Secret uses placeholder credentials; deploy with -i/-m to inject real ones." >&2
 }
 

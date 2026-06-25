@@ -99,8 +99,11 @@ The script reads a few environment variables; all are optional.
 - **`ASSUME_YES`** (default: _unset_) — any non-empty value runs unattended (same as `-y`).
 - **`SUMO_CHART_VERSION`** (default: pinned in the script) — the `sumologic/sumologic`
   chart version that install and `-o`/--output use. Pinned for reproducibility (CI
-  validates the pinned version); override to try a newer chart, e.g.
-  `SUMO_CHART_VERSION=5.3.0`.
+  validates the pinned version). Set it in the environment to use a specific version
+  without prompting, e.g. `SUMO_CHART_VERSION=5.3.0`. When **not** set in the
+  environment, an interactive run lets you pick a version from the available list
+  (or enter one), defaulting to the pin; unattended runs (`-y`) use the pin. The chosen
+  version is echoed on install so runs are reproducible.
 - **`SUMOLOGIC_ACCESS_ID`** / **`SUMOLOGIC_ACCESS_KEY`** (default: _unset_) — your Sumo
   credentials, used when no secret backend is available (see below).
 
