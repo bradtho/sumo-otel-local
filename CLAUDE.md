@@ -97,11 +97,26 @@ with dummy creds + `kubeconform`, then validates server-side on a KinD cluster
 
 ## How changes are verified
 
-There is no unit-test framework. Behaviour is verified with **stub harnesses**:
-override external commands (`kind`, `helm`, `podman`, `security`, …) as Bash functions
-that record their argv to a temp file, `source` the script (with `set --` first so the
-test's positional args don't reach the arg parser), drive the target function, and
-assert on captured calls. Feed prompt input via here-strings/pipes so `read` sees it.
+A committed **bats-core** suite lives in `tests/` and runs in CI (the `Tests
+(ubuntu-latest)` / `Tests (macos-latest)` jobs). Run it locally with `bats tests/`
+(`brew install bats-core` / `apt-get install -y bats`).
+
+- `tests/test_helper.bash` — `load_script` sources the script (strict mode + the ERR
+  trap live in `main()`, guarded by `BASH_SOURCE == $0`, so sourcing has no side
+  effects), plus `setup_stubs` / `stub_cmd` / `assert_called` / `refute_called`.
+- `tests/unit.bats` — pure functions (`mem_to_mib`, `yaml_escape`, `secret_env_var`,
+  `confirm`/`ask`, the `MIN_*` validation).
+- `tests/verify.bats` — the download-integrity helpers (`sha256_of`, `remote_sha256`,
+  `verify_sha256`: accept / mismatch / fail-closed).
+- `tests/flow.bats` — action functions against stubbed externals: the
+  `confirm_destructive` teardown gate, `uninstall`/`purge`, and `install_sumo`/`output`
+  arg-building (including that credentials never reach the helm command line).
+
+Pattern: override external commands (`kind`, `helm`, `podman`, …) as Bash functions
+that record argv, or use `stub_cmd` for PATH stubs; drive the target function with
+`run`; assert on `$status`/`$output` or the recorded calls. Functions that set an EXIT
+trap (`install_sumo`, `output`) are driven inside a subshell (`run bash -c '…'`) so the
+trap can't disturb bats. Feed prompt input via here-strings so `read` sees it.
 
 ## Workflow & releases
 

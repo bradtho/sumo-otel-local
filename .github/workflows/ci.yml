@@ -70,6 +70,33 @@ jobs:
       - name: yamllint
         run: yamllint -c .yamllint.yml kind-config.yaml values.yaml examples/*.yaml manifests/*.yaml
 
+  # Runs the bats-core unit/flow suite (tests/) on both OSes. The script is
+  # sourceable without side effects (strict mode + traps live in main()), so the
+  # tests exercise individual functions against stubbed external commands.
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install bats (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats
+
+      - name: Install bats (macOS)
+        if: runner.os == 'macOS'
+        run: brew install bats-core
+
+      - name: Run bats suite
+        run: bats --print-output-on-failure tests/
+
   # Validates a "mock" deployment with no live Sumo org: the upstream sumologic
   # chart is rendered against every values file with dummy credentials (mirroring
   # the flags sumo-otel-local.sh passes), the rendered manifests are schema-checked
