@@ -59,11 +59,29 @@ Options:
   -v, --version   Display the version of the script.
   -y, --yes       Run unattended: assume yes and use defaults for all prompts.
                   (also via the ASSUME_YES env var; --non-interactive is an alias)
+  -f, --force     Confirm destructive teardown (-u/-p) non-interactively.
+                  Required for -u/-p under -y; never read from the environment.
 ```
 
 `-y`/`--yes` is a modifier, combine it with an action, e.g. `./sumo-otel-local.sh -y -i`.
 In unattended mode the Sumo credentials **must** come from secret storage or the
 environment (the script will not block on a prompt).
+
+### Destructive teardown requires `--force` when unattended
+
+`-y`/`ASSUME_YES` does **not** auto-confirm `-u`/`--uninstall` or `-p`/`--purge` — a
+stray `ASSUME_YES` (e.g. exported in a shell profile) must never be able to delete a
+cluster, Podman machine, or your stored credentials. To tear down without prompts, pass
+the explicit `-f`/`--force` flag (which, unlike `ASSUME_YES`, is **never** read from the
+environment), placed before the action:
+
+```bash
+./sumo-otel-local.sh --force -u        # delete the cluster, no prompt
+./sumo-otel-local.sh -y --force -p     # full unattended teardown + remove stored creds
+```
+
+Without `--force`, `-y -p` refuses and exits non-zero. Run `-u`/`-p` with no flags for
+the normal interactive confirm + type-the-cluster-name guard.
 
 ## Configuration
 

@@ -16,6 +16,8 @@ function help {
     echo "  -v, --version   Display the version of the script."
     echo "  -y, --yes       Run unattended: assume yes and use defaults for all prompts."
     echo "                  (also via the ASSUME_YES env var; --non-interactive is an alias)"
+    echo "  -f, --force     Confirm destructive teardown (-u/-p) non-interactively."
+    echo "                  Required for -u/-p under -y; never read from the environment."
 }
 
 # Detect OS and CPU architecture, normalized to the tokens used by release assets.
@@ -84,6 +86,12 @@ DEFAULT_CLUSTER_NAME="sumo"
 # blocking on input.
 ASSUME_YES="${ASSUME_YES:-}"
 
+# Explicit confirmation for destructive teardown (-u/-p), set ONLY by the -f/--force
+# flag. Deliberately NOT read from the environment: ASSUME_YES alone must never be able
+# to delete a cluster/machine/credentials, so a stray ASSUME_YES in a shell profile
+# can't trigger an irreversible wipe. See confirm_destructive().
+FORCE=""
+
 # Ask a yes/no question. $1=prompt, $2=default (y|n, default n). Returns 0 for yes.
 # In unattended mode (ASSUME_YES) it answers yes without prompting.
 function confirm {
@@ -108,6 +116,38 @@ function ask {
     fi
     read -rp "$prompt" reply
     printf '%s' "${reply:-$default}"
+}
+
+# Gate a destructive teardown (cluster / Podman machine / stored credentials). Sets
+# CLUSTER_NAME to the cluster to remove and returns 0 to proceed. On an interactive
+# "no" or a typed [exit] it prints a cancel message and exits 0.
+#
+# Unlike confirm(), this does NOT proceed under ASSUME_YES alone — unattended teardown
+# requires the explicit -f/--force flag (FORCE), so a stray ASSUME_YES env var cannot
+# trigger an irreversible wipe. With --force it proceeds on the default cluster without
+# prompting. $1 = human description of the action (for messages).
+function confirm_destructive {
+    local action=$1
+    if [[ -n "$FORCE" ]]; then
+        CLUSTER_NAME="$DEFAULT_CLUSTER_NAME"
+        echo "--force: proceeding to ${action} (cluster '${CLUSTER_NAME}') without prompting." >&2
+        return 0
+    fi
+    if [[ -n "$ASSUME_YES" ]]; then
+        echo "Refusing to ${action} in unattended mode (-y/ASSUME_YES) without --force." >&2
+        echo "Re-run with --force to confirm destructive teardown non-interactively." >&2
+        exit 1
+    fi
+    if ! confirm "Are you sure you want to continue?" n; then
+        echo "Cancelling and exiting script..."
+        exit 0
+    fi
+    CLUSTER_NAME=$(ask "Type the name of the cluster (Default: ${DEFAULT_CLUSTER_NAME}) to continue. Type [exit] to cancel: " "$DEFAULT_CLUSTER_NAME")
+    if [[ "$CLUSTER_NAME" == "exit" ]]; then
+        echo "Cancelling and exiting script..."
+        exit 0
+    fi
+    return 0
 }
 
 # Verify required commands exist; exit with clear guidance if any are missing.
@@ -629,21 +669,11 @@ function uninstall {
     set_kind_provider
 
     echo "Caution: This will delete the cluster"
-    if confirm "Are you sure you want to continue?" n; then
-        CLUSTER_NAME=$(ask "Type the name of the cluster (Default: ${DEFAULT_CLUSTER_NAME}) to continue. Type [exit] to cancel: " "$DEFAULT_CLUSTER_NAME")
-        if [[ $CLUSTER_NAME == "exit" ]]; then
-            echo "Cancelling and exiting script..."
-            exit 0
-        else
-            echo "Deleting Cluster: ${CLUSTER_NAME}"
-            kind delete cluster --name "${CLUSTER_NAME}"
-            if [[ "$CONTAINER_RUNTIME" == "podman" && "$OS" == "darwin" ]]; then
-                echo "Leaving Podman machine intact (use --purge to remove it)."
-            fi
-        fi
-    else
-        echo "Cancelling and exiting script..."
-        exit 0
+    confirm_destructive "delete the cluster"
+    echo "Deleting Cluster: ${CLUSTER_NAME}"
+    kind delete cluster --name "${CLUSTER_NAME}"
+    if [[ "$CONTAINER_RUNTIME" == "podman" && "$OS" == "darwin" ]]; then
+        echo "Leaving Podman machine intact (use --purge to remove it)."
     fi
 }
 
@@ -664,23 +694,13 @@ function purge {
         echo "Caution: This will delete the cluster. (No Podman machine to remove under ${CONTAINER_RUNTIME}.)"
     fi
 
-    if confirm "Are you sure you want to continue?" n; then
-        CLUSTER_NAME=$(ask "Type the name of the cluster (Default: ${DEFAULT_CLUSTER_NAME}) to continue. Type [exit] to cancel: " "$DEFAULT_CLUSTER_NAME")
-        if [[ $CLUSTER_NAME == "exit" ]]; then
-            echo "Cancelling and exiting script..."
-            exit 0
-        else
-            echo "Deleting Cluster: ${CLUSTER_NAME}"
-            kind delete cluster --name "${CLUSTER_NAME}"
-            if [[ "$has_machine" == "yes" && -n "$running_machine" ]]; then
-                echo "Stopping and Removing the - ${running_machine} - Podman Machine..."
-                podman machine stop "${running_machine}"
-                podman machine rm "${running_machine}"
-            fi
-        fi
-    else
-        echo "Cancelling and exiting script..."
-        exit 0
+    confirm_destructive "delete the cluster and remove the Podman machine"
+    echo "Deleting Cluster: ${CLUSTER_NAME}"
+    kind delete cluster --name "${CLUSTER_NAME}"
+    if [[ "$has_machine" == "yes" && -n "$running_machine" ]]; then
+        echo "Stopping and Removing the - ${running_machine} - Podman Machine..."
+        podman machine stop "${running_machine}"
+        podman machine rm "${running_machine}"
     fi
 
     if secret_delete sumologic_access_id; then
@@ -923,6 +943,12 @@ while [[ $# -gt 0 ]]; do
             # Modifier (not an action): enable unattended mode, then process the
             # remaining args. Place before the action flag, e.g. `-y -i`.
             ASSUME_YES="yes"
+            ;;
+        -f | --force)
+            # Modifier (not an action): explicitly confirm destructive teardown
+            # (-u/-p) so it can run without prompting. Place before the action flag,
+            # e.g. `--force -p` or `-y --force -p`.
+            FORCE="yes"
             ;;
         *)
             echo "Invalid Option: $1"
