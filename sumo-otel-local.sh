@@ -89,6 +89,16 @@ VERSION="0.4.0" # x-release-please-version
 # Default KinD cluster name, used by create and teardown.
 DEFAULT_CLUSTER_NAME="sumo"
 
+# Chart overrides applied to EVERY install and render, so `-o`/--output mirrors what
+# `-i`/`-m` deploys. Single source of truth: both install_sumo and output append this,
+# and CI sources the script to reuse it. Per-invocation values (credentials,
+# clusterName, user --values file) are added separately by each flow.
+SUMO_COMMON_SET=(
+    --set-string fullnameOverride=sumo
+    --set sumologic.falco.enabled=false
+    --set sumologic.logs.systemd.enabled=false
+)
+
 # Unattended mode: when set (via -y/--yes/--non-interactive or the ASSUME_YES env
 # var), confirm() auto-answers yes and value prompts use their defaults without
 # blocking on input.
@@ -695,9 +705,7 @@ EOF
     [[ -n "$HELM_VALUES" ]] && helm_args+=(--values "$HELM_VALUES")
     helm_args+=(--values "$secrets_file")
     helm_args+=(--set-string "sumologic.clusterName=${CLUSTER_NAME}")
-    helm_args+=(--set-string fullnameOverride=sumo)
-    helm_args+=(--set sumologic.falco.enabled=false)
-    helm_args+=(--set sumologic.logs.systemd.enabled=false)
+    helm_args+=("${SUMO_COMMON_SET[@]}")
 
     helm "${helm_args[@]}"
 }
@@ -712,17 +720,37 @@ function output {
         HELM_VALUES="$DEFAULT_HELM_VALUES"
     fi
     [[ -n "$HELM_VALUES" ]] && require_values_file "$HELM_VALUES"
+    CLUSTER_NAME=$(ask "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
     K8S_YAML=$(ask "Name and Location of the rendered Kubernetes Manifest YAML file. [default=sumologic-rendered.yaml]: " "$DEFAULT_K8S_YAML")
 
     # The chart is referenced as sumologic/sumologic, so the repo must be registered.
     ensure_helm_repo
 
-    # Only pass -f when a values file is in use; the chart renders with defaults otherwise.
-    local template_args=(template --namespace=sumologic --create-namespace)
-    [[ -n "$HELM_VALUES" ]] && template_args+=(-f "$HELM_VALUES")
-    template_args+=(sumologic sumologic/sumologic --version "$SUMO_CHART_VERSION")
+    # The chart requires accessId/accessKey to render. Use PLACEHOLDER credentials so
+    # the rendered manifest is faithful in structure without writing real secrets to the
+    # output file; deploy with -i/-m, which inject real credentials securely. Placeholders
+    # go via a private temp values file (consistent with install_sumo) rather than argv.
+    secrets_file=$(mktemp)
+    chmod 600 "$secrets_file"
+    trap 'rm -f "$secrets_file"' EXIT
+    cat >"$secrets_file" <<'EOF'
+sumologic:
+  accessId: "PLACEHOLDER_ACCESS_ID"
+  accessKey: "PLACEHOLDER_ACCESS_KEY"
+EOF
+
+    # Mirror install_sumo's args so the rendered manifest matches what -i/-m deploys:
+    # optional user values, then placeholder creds, clusterName, and the shared overrides.
+    local template_args=(template sumologic sumologic/sumologic
+        --version "$SUMO_CHART_VERSION"
+        --namespace=sumologic --create-namespace)
+    [[ -n "$HELM_VALUES" ]] && template_args+=(--values "$HELM_VALUES")
+    template_args+=(--values "$secrets_file")
+    template_args+=(--set-string "sumologic.clusterName=${CLUSTER_NAME}")
+    template_args+=("${SUMO_COMMON_SET[@]}")
 
     helm "${template_args[@]}" | tee "${K8S_YAML}"
+    echo "Note: the rendered Secret uses placeholder credentials; deploy with -i/-m to inject real ones." >&2
 }
 
 function uninstall {

@@ -91,14 +91,20 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Single source of truth: derive the pinned chart version from the script's
-      # SUMO_CHART_VERSION default so CI validates exactly the version users deploy.
-      - name: Resolve pinned chart version
+      # Single source of truth: source the script to reuse its pinned chart version and
+      # the shared SUMO_COMMON_SET overrides, so CI validates exactly what users deploy
+      # (no re-listed flags to drift). The common-set tokens contain no spaces, so a
+      # space-joined string is safe to re-split into argv downstream.
+      - name: Load chart config from the script
         run: |
-          ver=$(sed -n 's/.*SUMO_CHART_VERSION:-\([0-9.][0-9.]*\)}.*/\1/p' sumo-otel-local.sh)
-          if [[ -z "$ver" ]]; then echo "Could not parse SUMO_CHART_VERSION from sumo-otel-local.sh"; exit 1; fi
-          echo "CHART_VERSION=$ver" >> "$GITHUB_ENV"
-          echo "Pinned sumologic chart version: $ver"
+          set --
+          # shellcheck disable=SC1091
+          source ./sumo-otel-local.sh; trap - ERR EXIT
+          [[ -n "$SUMO_CHART_VERSION" ]] || { echo "Could not read SUMO_CHART_VERSION"; exit 1; }
+          [[ "${#SUMO_COMMON_SET[@]}" -gt 0 ]] || { echo "Could not read SUMO_COMMON_SET"; exit 1; }
+          echo "CHART_VERSION=$SUMO_CHART_VERSION" >> "$GITHUB_ENV"
+          echo "COMMON_SET=${SUMO_COMMON_SET[*]}" >> "$GITHUB_ENV"
+          echo "Chart $SUMO_CHART_VERSION; common overrides: ${SUMO_COMMON_SET[*]}"
 
       - name: Install Helm
         uses: azure/setup-helm@v4
@@ -134,13 +140,13 @@ jobs:
       # skips CRDs/custom resources kubeconform has no schema for (validated server-side later).
       - name: Render & schema-check all values files
         run: |
+          # $COMMON_SET (the script's shared overrides) is intentionally unquoted so it
+          # word-splits into argv; its tokens contain no spaces.
           common_flags=(
             --namespace "$NS" --create-namespace
             -f /tmp/ci-creds.yaml
             --set-string sumologic.clusterName=ci-test
-            --set-string fullnameOverride=sumo
-            --set sumologic.falco.enabled=false
-            --set sumologic.logs.systemd.enabled=false
+            $COMMON_SET
           )
           fail=0
           for vf in values.yaml examples/*.yaml; do
@@ -189,13 +195,12 @@ jobs:
 
       - name: helm install --dry-run=server
         run: |
+          # $COMMON_SET is unquoted on purpose so it word-splits into argv (no spaces).
           common_flags=(
             --namespace "$NS" --create-namespace
             -f /tmp/ci-creds.yaml
             --set-string sumologic.clusterName=ci-test
-            --set-string fullnameOverride=sumo
-            --set sumologic.falco.enabled=false
-            --set sumologic.logs.systemd.enabled=false
+            $COMMON_SET
           )
           fail=0
           for vf in values.yaml examples/*.yaml; do
