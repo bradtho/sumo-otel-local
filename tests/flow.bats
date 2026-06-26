@@ -284,6 +284,7 @@ CHART_STUB='helm(){ printf "%s\n" "NAME CHART_VERSION APP_VERSION DESC" "sumolog
         }
         verify_sha256() { :; }
         kubectl() { :; }
+        tar() { :; }
         install_binary() { echo "install_binary $1" >>"$calls"; }
         install_dependencies
         [ -d "$scratch" ] && echo "SCRATCH_REMAINS" || echo "SCRATCH_GONE"
@@ -292,6 +293,8 @@ CHART_STUB='helm(){ printf "%s\n" "NAME CHART_VERSION APP_VERSION DESC" "sumolog
     assert_called 'install_binary .*/scratch/jq$'
     assert_called 'install_binary .*/scratch/kubectl$'
     assert_called 'install_binary .*/scratch/kind$'
+    # helm comes from the verified release tarball: $tmpdir/${OS}-${ARCH}/helm
+    assert_called 'install_binary .*/scratch/(darwin|linux)-(amd64|arm64)/helm$'
     # Must not use the OLD predictable paths. mktemp -d legitimately lives under /tmp
     # (and bats' own tmpdir is under /tmp on Linux), so refute the specific fixed
     # filenames directly in /tmp, not the /tmp prefix.

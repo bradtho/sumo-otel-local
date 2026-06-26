@@ -137,6 +137,14 @@ PODMAN_VERSION="${PODMAN_VERSION:-v6.0.0}"
 # Known-good digest (kind v0.32.0 default): sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5
 KINDEST_NODE_VERSION="${KINDEST_NODE_VERSION:-v1.36.1}"
 
+# Homebrew bootstrap installer, pinned to a specific commit (not mutable HEAD) and
+# verified against this SHA-256 before it is made executable and run, so --install/--init
+# never execute an unreviewed upstream script. To bump: pick a newer Homebrew/install
+# commit and recompute the digest (the installer itself then fetches current Homebrew).
+# NOT Renovate-tracked — the content digest can't be auto-refreshed (cf. shfmt in CI).
+HOMEBREW_INSTALL_COMMIT="5e78e698e405a17b63b5fe41ff747f9fccf39472"
+HOMEBREW_INSTALL_SHA256="99287f194a8b3c9e6b0203a11a5fa54518be57209343e6bb954dec4635796d9d"
+
 # Script version. Kept in sync with the published GitHub Release tag; printed by
 # -v/--version without any network calls. The trailing annotation lets
 # release-please rewrite this line automatically when it cuts a release.
@@ -332,10 +340,20 @@ function install_dependencies {
         brew install --quiet "${brew_pkgs[@]}"
     elif ! command -v brew &>/dev/null; then
         if confirm "Homebrew is not installed. Install it?" n; then
-            curl -fsSL -o install_homebrew.sh https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
-            chmod 700 install_homebrew.sh
-            ./install_homebrew.sh
-            rm install_homebrew.sh
+            # Run a PINNED, checksum-verified copy of the Homebrew installer rather than
+            # piping mutable HEAD straight into a shell. Surface the exact source so the
+            # user can see what will execute; verify_sha256 aborts on any mismatch.
+            local brew_tmp
+            brew_tmp=$(mktemp -d)
+            trap 'rm -rf "$brew_tmp"' EXIT
+            echo "Fetching the Homebrew installer (pinned commit ${HOMEBREW_INSTALL_COMMIT}):" >&2
+            echo "  https://github.com/Homebrew/install/blob/${HOMEBREW_INSTALL_COMMIT}/install.sh" >&2
+            curl -fsSL -o "$brew_tmp/install_homebrew.sh" "https://raw.githubusercontent.com/Homebrew/install/${HOMEBREW_INSTALL_COMMIT}/install.sh"
+            verify_sha256 "$brew_tmp/install_homebrew.sh" "$HOMEBREW_INSTALL_SHA256" "Homebrew installer"
+            chmod 700 "$brew_tmp/install_homebrew.sh"
+            "$brew_tmp/install_homebrew.sh"
+            rm -rf "$brew_tmp"
+            trap - EXIT
             install_dependencies
         else
             echo "Installing Dependencies Directly..."
@@ -344,7 +362,7 @@ function install_dependencies {
             # host can't redirect or clobber a download. Cleaned up on exit (a backstop
             # for the mid-download error path) and again explicitly at the end — a later
             # EXIT trap in the flow (e.g. install_sumo) would otherwise replace this one.
-            local jq_base ver tmpdir
+            local jq_base ver tmpdir helm_tgz
             tmpdir=$(mktemp -d)
             trap 'rm -rf "$tmpdir"' EXIT
             if ! command -v jq &>/dev/null; then
@@ -365,13 +383,15 @@ function install_dependencies {
 
             if ! command -v helm &>/dev/null; then
                 echo "Installing Helm ${HELM_VERSION}..."
-                # get-helm-3 verifies the downloaded helm tarball against its published
-                # SHA-256 itself, so the binary is checksum-checked; DESIRED_VERSION pins
-                # which helm version it installs. (The script is fetched from a mutable
-                # master ref — pinning that is a separate item.)
-                curl -fsSL -o "$tmpdir/get_helm.sh" https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
-                chmod 700 "$tmpdir/get_helm.sh"
-                DESIRED_VERSION="$HELM_VERSION" "$tmpdir/get_helm.sh"
+                # Download the pinned helm release tarball directly and verify its
+                # published SHA-256 before extracting — avoids executing the get-helm-3
+                # bootstrap script from a mutable master ref. Tarball lays out as
+                # ${OS}-${ARCH}/helm.
+                helm_tgz="helm-${HELM_VERSION}-${OS}-${ARCH}.tar.gz"
+                curl -fsSL -o "$tmpdir/$helm_tgz" "https://get.helm.sh/${helm_tgz}"
+                verify_sha256 "$tmpdir/$helm_tgz" "$(remote_sha256 "https://get.helm.sh/${helm_tgz}.sha256")" helm
+                tar -xzf "$tmpdir/$helm_tgz" -C "$tmpdir"
+                install_binary "$tmpdir/${OS}-${ARCH}/helm" helm
             fi
 
             # Only auto-install a runtime when the user has neither Docker nor Podman.

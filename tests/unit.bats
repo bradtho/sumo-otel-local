@@ -112,6 +112,21 @@ setup() {
     [ "$output" = "v1.30.0" ]
 }
 
+@test "Homebrew installer is pinned to a commit (no mutable HEAD) and checksum-verified" {
+    run grep -c 'Homebrew/install/HEAD' "$SCRIPT"
+    [ "$output" -eq 0 ] # the mutable HEAD ref is gone
+    grep -Fq 'HOMEBREW_INSTALL_COMMIT' "$SCRIPT"
+    grep -Fq 'HOMEBREW_INSTALL_SHA256' "$SCRIPT"
+    run bash -c 'source "$1"; printf "%s %s" "$HOMEBREW_INSTALL_COMMIT" "$HOMEBREW_INSTALL_SHA256"' _ "$SCRIPT"
+    [[ "$output" =~ ^[0-9a-f]{40}\ [0-9a-f]{64}$ ]] # 40-hex commit + 64-hex sha256
+}
+
+@test "helm installs from a verified tarball, not the get-helm-3 script" {
+    run grep -c 'scripts/get-helm-3' "$SCRIPT"
+    [ "$output" -eq 0 ] # the get-helm-3 bootstrap download is gone (comment mention is fine)
+    grep -Fq 'get.helm.sh' "$SCRIPT"
+}
+
 @test "secret_set (keychain): tolerates unset USER under set -u and uses -U" {
     run bash -c '
         source "$1"
