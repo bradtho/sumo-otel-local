@@ -51,6 +51,12 @@ else
     JQ_OS="linux"
 fi
 
+# Directory holding this script, so bundled assets (kind-config.yaml, values.yaml)
+# resolve no matter the caller's CWD. Bash 3.2-safe; works whether the script is run
+# or sourced (BASH_SOURCE[0] is the script path either way). User-supplied --values
+# paths stay relative to the CWD — only the bundled defaults are anchored here.
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
 # Choose a secret-storage backend: macOS Keychain, Linux libsecret (secret-tool),
 # or an environment-variable fallback when neither is available.
 if [[ "$OS" == "darwin" ]] && command -v security &>/dev/null; then
@@ -121,6 +127,15 @@ HELM_VERSION="${HELM_VERSION:-v4.2.2}"
 KIND_VERSION="${KIND_VERSION:-v0.32.0}"
 # renovate: datasource=github-releases depName=containers/podman
 PODMAN_VERSION="${PODMAN_VERSION:-v6.0.0}"
+
+# Pinned kindest/node image — the Kubernetes version the KinD cluster runs. This is the
+# default node image that kind ${KIND_VERSION} ships and tests with, so it pairs with the
+# pinned kind and renders/validates against the pinned chart. Used as the default in
+# init_cluster; select_node_image still lets you pick another version interactively.
+# Deliberately NOT Renovate-annotated: the node image is coupled to KIND_VERSION (it must
+# fall in kind's supported range), so bump it together with kind, not independently.
+# Known-good digest (kind v0.32.0 default): sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5
+KINDEST_NODE_VERSION="${KINDEST_NODE_VERSION:-v1.36.1}"
 
 # Script version. Kept in sync with the published GitHub Release tag; printed by
 # -v/--version without any network calls. The trailing annotation lets
@@ -664,16 +679,25 @@ function init_cluster {
         esac
     fi
 
-    if confirm "KinD will install the latest Kubernetes version. OK?" y; then
-        kind create cluster --name "${CLUSTER_NAME}" --config kind-config.yaml
+    # Anchor the bundled cluster config to the script dir (not the CWD) and fail early
+    # with a clear message if it's missing, instead of letting kind emit a raw error.
+    local kind_config="$SCRIPT_DIR/kind-config.yaml"
+    if [[ ! -f "$kind_config" ]]; then
+        echo "Error: bundled kind-config.yaml not found at '${kind_config}'." >&2
+        echo "Run the script from its repository clone (kind-config.yaml ships alongside it)." >&2
+        exit 1
+    fi
+
+    if confirm "Create the cluster with the pinned Kubernetes version (kindest/node:${KINDEST_NODE_VERSION})?" y; then
+        kind create cluster --name "${CLUSTER_NAME}" --config "$kind_config" --image "kindest/node:${KINDEST_NODE_VERSION}"
     else
         node_image=$(select_node_image)
         if [[ -n "$node_image" ]]; then
             echo "Creating cluster '${CLUSTER_NAME}' with ${node_image}..."
-            kind create cluster --name "${CLUSTER_NAME}" --config kind-config.yaml --image "${node_image}"
+            kind create cluster --name "${CLUSTER_NAME}" --config "$kind_config" --image "${node_image}"
         else
             echo "No version selected; using KinD's default node image."
-            kind create cluster --name "${CLUSTER_NAME}" --config kind-config.yaml
+            kind create cluster --name "${CLUSTER_NAME}" --config "$kind_config"
         fi
     fi
 }
@@ -786,7 +810,7 @@ function install_sumo {
         secret_set sumologic_access_key "$ACCESS_KEY"
     fi
 
-    DEFAULT_HELM_VALUES="values.yaml"
+    DEFAULT_HELM_VALUES="$SCRIPT_DIR/values.yaml"
     echo "A Helm values file is optional; the chart can install with --set values alone."
     echo "Example values live in the examples folder, e.g. examples/metrics_interval.yaml"
     HELM_VALUES=$(ask "Path to a Helm values file (blank to skip) [default if present=${DEFAULT_HELM_VALUES}]: " "${HELM_VALUES:-}")
@@ -863,7 +887,7 @@ EOF
 
 function output {
     require_cmd helm
-    DEFAULT_HELM_VALUES="values.yaml"
+    DEFAULT_HELM_VALUES="$SCRIPT_DIR/values.yaml"
     DEFAULT_K8S_YAML="sumologic-rendered.yaml"
 
     HELM_VALUES=$(ask "Path to a Helm values file (blank to skip) [default if present=${DEFAULT_HELM_VALUES}]: " "${HELM_VALUES:-}")

@@ -142,19 +142,22 @@ known-good version so runs are reproducible and match what CI validates; every p
 overridable from the environment. Homebrew always installs its current formula, so
 these pins apply **only** to the direct-download path.
 
-| Tool                            | Pinned default                | Override env var     |
-| ------------------------------- | ----------------------------- | -------------------- |
-| `kubectl`                       | `v1.36.2`                     | `KUBECTL_VERSION`    |
-| `helm`                          | `v4.2.2`                      | `HELM_VERSION`       |
-| `kind`                          | `v0.32.0`                     | `KIND_VERSION`       |
-| `podman` (macOS direct install) | `v6.0.0`                      | `PODMAN_VERSION`     |
-| `sumologic/sumologic` chart     | `5.2.0`                       | `SUMO_CHART_VERSION` |
-| `kindest/node` (Kubernetes)     | kind's default for `v0.32.0`  | the version prompt   |
+| Tool                            | Pinned default | Override env var       |
+| ------------------------------- | -------------- | ---------------------- |
+| `kubectl`                       | `v1.36.2`      | `KUBECTL_VERSION`      |
+| `helm`                          | `v4.2.2`       | `HELM_VERSION`         |
+| `kind`                          | `v0.32.0`      | `KIND_VERSION`         |
+| `podman` (macOS direct install) | `v6.0.0`       | `PODMAN_VERSION`       |
+| `sumologic/sumologic` chart     | `5.2.0`        | `SUMO_CHART_VERSION`   |
+| `kindest/node` (Kubernetes)     | `v1.36.1`      | `KINDEST_NODE_VERSION` |
 
-CI installs the **same `helm`** as the script's `HELM_VERSION` (so render/dry-run match
-deployment), and [Renovate](#contributing) keeps these pins current via annotations next
-to each constant. The `kindest/node` image is still chosen interactively (or left to
-kind's default) — see [Kubernetes version](#kubernetes-version).
+CI installs the **same `helm`** as the script's `HELM_VERSION` and creates its KinD
+cluster with the **same `kind` + `kindest/node`** (so render/dry-run match what users
+deploy), and [Renovate](#contributing) keeps these pins current via annotations next to
+each constant. `KINDEST_NODE_VERSION` is the default node image kind `v0.32.0` ships and
+tests with, so it's coupled to `KIND_VERSION` (bump them together) — that's why it isn't
+Renovate-tracked. You can still pick another version interactively — see
+[Kubernetes version](#kubernetes-version).
 
 ### Project config file
 
@@ -225,9 +228,13 @@ commands above.
 
 ## Kubernetes version
 
-During cluster creation the script fetches the available `kindest/node` image tags and
-lets you pick a Kubernetes version (e.g. `v1.32.2`), or press Enter to use kind's
-default. If the tag list can't be fetched (offline), you can type a version manually.
+During cluster creation the script offers to use the **pinned** Kubernetes version
+(`kindest/node:v1.36.1` by default — the image kind `v0.32.0` ships and tests with, so
+the cluster is reproducible and matches CI). Accept it (the default) for a known-good
+cluster, or decline to pick another version: the script fetches the available
+`kindest/node` image tags and lets you choose one (e.g. `v1.32.2`), enter a tag manually,
+or fall back to kind's built-in default. Override the pin non-interactively with
+`KINDEST_NODE_VERSION` (see [Pinned tool versions](#pinned-tool-versions)).
 
 ## Container runtimes
 

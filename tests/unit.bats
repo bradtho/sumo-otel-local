@@ -97,3 +97,17 @@ setup() {
     KIND_VERSION=v0.30.0 KUBECTL_VERSION=v1.30.0 run bash -c 'source "$1"; echo "$KUBECTL_VERSION $KIND_VERSION"' _ "$SCRIPT"
     [ "$output" = "v1.30.0 v0.30.0" ]
 }
+
+@test "SCRIPT_DIR resolves to the script directory holding the bundled assets" {
+    run bash -c 'source "$1"; echo "$SCRIPT_DIR"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ -f "$output/kind-config.yaml" ]
+    [ -f "$output/values.yaml" ]
+}
+
+@test "KINDEST_NODE_VERSION defaults to the pin and is overridable" {
+    run bash -c 'source "$1"; echo "$KINDEST_NODE_VERSION"' _ "$SCRIPT"
+    [ "$output" = "v1.36.1" ]
+    KINDEST_NODE_VERSION=v1.30.0 run bash -c 'source "$1"; echo "$KINDEST_NODE_VERSION"' _ "$SCRIPT"
+    [ "$output" = "v1.30.0" ]
+}
