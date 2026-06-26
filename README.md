@@ -41,8 +41,11 @@ chmod +x sumo-otel-local.sh
 ./sumo-otel-local.sh -i
 ```
 
-Follow the in-script prompts. To tear everything down again, use `-u` (cluster) or
-`-p` (cluster and, with Podman on macOS, the Podman machine).
+Follow the in-script prompts. Install offers to **wait for the collector pods to become
+ready** (`helm --wait`) and, on success, prints copy-paste next steps (watch pods, tail
+the collector logs, run `-s`/`--status`, and verify data in Sumo); on failure it points
+you at `-s`. To tear everything down again, use `-u` (cluster) or `-p` (cluster and, with
+Podman on macOS, the Podman machine).
 
 ## Commands
 

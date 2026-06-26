@@ -814,7 +814,31 @@ EOF
     helm_args+=(--set-string "sumologic.clusterName=${CLUSTER_NAME}")
     helm_args+=("${SUMO_COMMON_SET[@]}")
 
-    helm "${helm_args[@]}"
+    # Optionally block until the collector pods are Ready (helm --wait). Default yes;
+    # decline for a fire-and-forget install and check progress with -s/--status.
+    if confirm "Wait for the collector pods to become ready?" y; then
+        helm_args+=(--wait --timeout 10m)
+    fi
+
+    # Guard the install so a failure (incl. a --wait timeout) gives an actionable hint
+    # rather than the generic ERR-trap message.
+    if ! helm "${helm_args[@]}"; then
+        echo "Helm install did not complete cleanly (see the error above)." >&2
+        echo "Inspect what's deployed:  $0 -s" >&2
+        echo "Watch the pods:           kubectl get pods -n sumologic -w" >&2
+        exit 1
+    fi
+
+    # Success: surface concrete next steps (label/name reflect fullnameOverride=sumo).
+    cat <<EOF
+
+Sumo collector installed — chart ${chart_version}, cluster '${CLUSTER_NAME}'.
+Next steps:
+  Watch pods:           kubectl get pods -n sumologic -w
+  Tail collector logs:  kubectl logs -n sumologic -l app.kubernetes.io/name=sumo-otelcol-logs-collector -f
+  Health check:         $0 -s
+  Confirm data in Sumo: https://help.sumologic.com/docs/send-data/kubernetes/
+EOF
 }
 
 function output {

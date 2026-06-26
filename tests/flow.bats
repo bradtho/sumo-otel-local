@@ -94,6 +94,32 @@ setup() {
     [[ "$output" != *"accessId"* ]]
 }
 
+@test "install_sumo: on success appends --wait and prints copy-paste next steps" {
+    run bash -c 'source "$1"; require_cmd(){ :;}; ensure_helm_repo(){ :;}; secret_get(){ printf STORED;}; select_chart_version(){ printf 5.2.0;}
+        helm(){ printf "HELM %s\n" "$*"; }; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"--wait --timeout 10m"* ]]
+    [[ "$output" == *"Next steps:"* ]]
+    [[ "$output" == *"app.kubernetes.io/name=sumo-otelcol-logs-collector"* ]]
+}
+
+@test "install_sumo: declining the wait omits --wait" {
+    run bash -c 'source "$1"; require_cmd(){ :;}; ensure_helm_repo(){ :;}; secret_get(){ printf STORED;}; select_chart_version(){ printf 5.2.0;}
+        confirm(){ return 1; }; helm(){ printf "HELM %s\n" "$*"; }; ASSUME_YES=""; install_sumo </dev/null' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"--wait"* ]]
+}
+
+@test "install_sumo: a failed install hints at -s without tripping the ERR trap or printing next steps" {
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo TRAP_FIRED" ERR
+        require_cmd(){ :;}; ensure_helm_repo(){ :;}; secret_get(){ printf STORED;}; select_chart_version(){ printf 5.2.0;}
+        helm(){ return 1; }; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
+    [ "$status" -ne 0 ]
+    [[ "$output" != *"TRAP_FIRED"* ]]
+    [[ "$output" == *"did not complete"* ]]
+    [[ "$output" != *"Next steps"* ]]
+}
+
 @test "output: mirrors install (version + clusterName + overrides) with placeholder creds off-argv" {
     # Capture helm's argv to a file (via a closure) so the assertion doesn't depend on
     # the `helm | tee` pipe's stdout, which behaves differently across platforms.
