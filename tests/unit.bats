@@ -111,3 +111,19 @@ setup() {
     KINDEST_NODE_VERSION=v1.30.0 run bash -c 'source "$1"; echo "$KINDEST_NODE_VERSION"' _ "$SCRIPT"
     [ "$output" = "v1.30.0" ]
 }
+
+@test "secret_set (keychain): tolerates unset USER under set -u and uses -U" {
+    run bash -c '
+        source "$1"
+        set -u
+        SECRET_BACKEND=keychain
+        security() { printf "security %s\n" "$*"; }
+        unset USER LOGNAME
+        secret_set sumologic_access_id mysecret
+    ' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *" -U "* ]]
+    [[ "$output" == *"-s sumologic_access_id"* ]]
+    # The account passed to -a must be non-empty (USER/LOGNAME fell back to id -un).
+    printf '%s\n' "$output" | grep -Eq -- '-a [^[:space:]]+'
+}

@@ -759,9 +759,18 @@ function secret_get {
 
 # Store a secret for reuse on the next run.
 function secret_set {
-    local name=$1 value=$2 var
+    local name=$1 value=$2 var account
     case "$SECRET_BACKEND" in
-        keychain) security add-generic-password -a "$USER" -s "$name" -w "$value" ;;
+        keychain)
+            # The account label is cosmetic here; fall back when USER is unset so the
+            # command doesn't abort under `set -u` (id -un is portable and TTY-free).
+            account="${USER:-${LOGNAME:-$(id -un 2>/dev/null || echo unknown)}}"
+            # -U updates an existing item in place, so re-storing is idempotent instead
+            # of failing on a pre-existing entry. NOTE: `security` has no stdin-password
+            # mode, so -w briefly exposes the value on this process's argv (local only);
+            # the secret-tool backend below reads the value from stdin, which is the model.
+            security add-generic-password -U -a "$account" -s "$name" -w "$value"
+            ;;
         secret-tool) printf '%s' "$value" | secret-tool store --label="$name" service "$name" ;;
         env)
             var=$(secret_env_var "$name")
