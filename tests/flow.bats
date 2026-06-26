@@ -292,6 +292,9 @@ CHART_STUB='helm(){ printf "%s\n" "NAME CHART_VERSION APP_VERSION DESC" "sumolog
     assert_called 'install_binary .*/scratch/jq$'
     assert_called 'install_binary .*/scratch/kubectl$'
     assert_called 'install_binary .*/scratch/kind$'
-    refute_called 'install_binary /tmp/'
+    # Must not use the OLD predictable paths. mktemp -d legitimately lives under /tmp
+    # (and bats' own tmpdir is under /tmp on Linux), so refute the specific fixed
+    # filenames directly in /tmp, not the /tmp prefix.
+    refute_called 'install_binary /tmp/(jq|kubectl|kind)$'
     [[ "$output" == *"SCRATCH_GONE"* ]]
 }
