@@ -70,7 +70,8 @@ Exactly one **action** (`-i`/`-n`/`-m`/`-o`/`-p`/`-u`/`-v`) is run per invocatio
 giving two different actions is rejected with a clear error, and `-h`/`--help` always
 wins. `-y`/`--yes` and `-f`/`--force` are **modifiers** and are order-independent —
 combine either with an action in any order, e.g. `./sumo-otel-local.sh -y -i` or
-`./sumo-otel-local.sh -i -y`. In unattended mode the Sumo credentials **must** come from
+`./sumo-otel-local.sh -i -y`. Short flags may also be **clustered**, so `-yi` is
+equivalent to `-y -i`. In unattended mode the Sumo credentials **must** come from
 secret storage or the environment (the script will not block on a prompt).
 
 ### Destructive teardown requires `--force` when unattended

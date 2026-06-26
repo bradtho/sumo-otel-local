@@ -1,0 +1,5 @@
+# Code owners for sumo-otel-local.
+# The `main` branch ruleset requires code-owner review; this makes that rule
+# meaningful and collaborator-ready. As a single-maintainer repo, self-authored
+# PRs are merged with admin bypass (you cannot approve your own PR).
+* @bradtho

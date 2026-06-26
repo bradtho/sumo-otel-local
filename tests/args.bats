@@ -109,3 +109,40 @@ run_main() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"SUMO_RAN y=yes"* ]]
 }
+
+@test "clustered short flags: -yi is the same as -y -i (unattended install)" {
+    run_main -yi
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"SUMO_RAN y=yes"* ]]
+}
+
+@test "clustered short flags: -iy works too (order within a cluster is irrelevant)" {
+    run_main -iy
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"SUMO_RAN y=yes"* ]]
+}
+
+@test "clustered short flags: -fp is --force + purge" {
+    run_main -fp
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PURGE_RAN f=yes"* ]]
+}
+
+@test "a cluster containing an unknown letter errors (-ix -> Invalid Option: -x)" {
+    run_main -ix
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Invalid Option: -x"* ]]
+    [[ "$output" != *"DEPS_RAN"* ]] # the install flow must not run
+}
+
+@test "invalid-option error and help go to stderr, not stdout" {
+    # stdout only (stderr discarded): the error/help must NOT appear here
+    run bash -c "source \"\$1\"; $STUBS; main --bogus 2>/dev/null" _ "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [[ "$output" != *"Invalid Option"* ]]
+    [[ "$output" != *"Usage:"* ]]
+    # stderr only (stdout discarded): the error AND help ARE here
+    run bash -c "source \"\$1\"; $STUBS; main --bogus 1>/dev/null" _ "$SCRIPT"
+    [[ "$output" == *"Invalid Option: --bogus"* ]]
+    [[ "$output" == *"Usage:"* ]]
+}

@@ -21,6 +21,8 @@ function help {
     echo "                  (also via the ASSUME_YES env var; --non-interactive is an alias)"
     echo "  -f, --force     Confirm destructive teardown (-u/-p) non-interactively."
     echo "                  Required for -u/-p under -y; never read from the environment."
+    echo
+    echo "Short flags may be combined, e.g. -yi is the same as -y -i."
 }
 
 # Detect OS and CPU architecture, normalized to the tokens used by release assets.
@@ -1303,6 +1305,24 @@ function main {
     # fine; two *different* actions (e.g. `-i -u`) is a clear error instead of the old
     # silent first-wins. Errors are deferred to after parsing so -h always wins and the
     # report doesn't depend on token order.
+    # Expand clustered short flags (e.g. -iy -> -i -y, -yi -> -y -i) so modifiers can be
+    # combined with an action. Only a single dash followed by 2+ letters is split; long
+    # flags (--foo), single short flags (-i) and non-flags pass through unchanged. Guarded
+    # so an empty array isn't expanded under `set -u` (a Bash 3.2 nounset gotcha).
+    if [[ $# -gt 0 ]]; then
+        local expanded=() tok j
+        for tok in "$@"; do
+            if [[ "$tok" =~ ^-[A-Za-z][A-Za-z]+$ ]]; then
+                for ((j = 1; j < ${#tok}; j++)); do
+                    expanded+=("-${tok:j:1}")
+                done
+            else
+                expanded+=("$tok")
+            fi
+        done
+        set -- "${expanded[@]}"
+    fi
+
     local action="" conflict="" show_help="" bad_flag=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -1331,13 +1351,13 @@ function main {
 
     if [[ -n "$bad_flag" ]]; then
         echo "Invalid Option: $bad_flag" >&2
-        help
+        help >&2
         exit 1
     fi
 
     if [[ -n "$conflict" ]]; then
         echo "Specify exactly one action (-i/-n/-m/-o/-s/-p/-u/-v)." >&2
-        help
+        help >&2
         exit 1
     fi
 
@@ -1359,7 +1379,7 @@ function main {
         version) version ;;
         *)
             echo "Specify exactly one action (-i/-n/-m/-o/-s/-p/-u/-v), or -h for help." >&2
-            help
+            help >&2
             exit 1
             ;;
     esac
