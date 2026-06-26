@@ -339,20 +339,27 @@ function install_dependencies {
             install_dependencies
         else
             echo "Installing Dependencies Directly..."
-            local jq_base ver
+            # Download into a private, unpredictable 0700 scratch dir (mktemp -d) rather
+            # than fixed /tmp paths, so a hostile pre-created file/symlink on a shared
+            # host can't redirect or clobber a download. Cleaned up on exit (a backstop
+            # for the mid-download error path) and again explicitly at the end — a later
+            # EXIT trap in the flow (e.g. install_sumo) would otherwise replace this one.
+            local jq_base ver tmpdir
+            tmpdir=$(mktemp -d)
+            trap 'rm -rf "$tmpdir"' EXIT
             if ! command -v jq &>/dev/null; then
                 echo "Installing jq..."
                 jq_base="https://github.com/jqlang/jq/releases/download/jq-1.7.1"
-                curl -fsSL -o /tmp/jq "${jq_base}/jq-${JQ_OS}-${ARCH}"
-                verify_sha256 /tmp/jq "$(remote_sha256 "${jq_base}/sha256sum.txt" "jq-${JQ_OS}-${ARCH}")" jq
-                install_binary /tmp/jq jq
+                curl -fsSL -o "$tmpdir/jq" "${jq_base}/jq-${JQ_OS}-${ARCH}"
+                verify_sha256 "$tmpdir/jq" "$(remote_sha256 "${jq_base}/sha256sum.txt" "jq-${JQ_OS}-${ARCH}")" jq
+                install_binary "$tmpdir/jq" jq
             fi
 
             if ! command -v kubectl &>/dev/null; then
                 echo "Installing Kubectl ${KUBECTL_VERSION}..."
-                curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/${OS}/${ARCH}/kubectl"
-                verify_sha256 /tmp/kubectl "$(remote_sha256 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/${OS}/${ARCH}/kubectl.sha256")" kubectl
-                install_binary /tmp/kubectl kubectl
+                curl -fsSL -o "$tmpdir/kubectl" "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/${OS}/${ARCH}/kubectl"
+                verify_sha256 "$tmpdir/kubectl" "$(remote_sha256 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/${OS}/${ARCH}/kubectl.sha256")" kubectl
+                install_binary "$tmpdir/kubectl" kubectl
                 kubectl version --client
             fi
 
@@ -362,10 +369,9 @@ function install_dependencies {
                 # SHA-256 itself, so the binary is checksum-checked; DESIRED_VERSION pins
                 # which helm version it installs. (The script is fetched from a mutable
                 # master ref — pinning that is a separate item.)
-                curl -fsSL -o /tmp/get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
-                chmod 700 /tmp/get_helm.sh
-                DESIRED_VERSION="$HELM_VERSION" /tmp/get_helm.sh
-                rm -f /tmp/get_helm.sh
+                curl -fsSL -o "$tmpdir/get_helm.sh" https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
+                chmod 700 "$tmpdir/get_helm.sh"
+                DESIRED_VERSION="$HELM_VERSION" "$tmpdir/get_helm.sh"
             fi
 
             # Only auto-install a runtime when the user has neither Docker nor Podman.
@@ -375,13 +381,11 @@ function install_dependencies {
                     # The release tag carries a leading 'v' (used in the URL); the zip's
                     # internal directory does not (podman-6.0.0/, not podman-v6.0.0/).
                     ver="${PODMAN_VERSION#v}"
-                    curl -fsSL -o /tmp/podman.zip "https://github.com/containers/podman/releases/download/${PODMAN_VERSION}/podman-remote-release-darwin_${ARCH}.zip"
-                    verify_sha256 /tmp/podman.zip "$(remote_sha256 "https://github.com/containers/podman/releases/download/${PODMAN_VERSION}/shasums" "podman-remote-release-darwin_${ARCH}.zip")" podman
-                    rm -rf /tmp/podman-extract
-                    unzip -q /tmp/podman.zip -d /tmp/podman-extract
-                    install_binary "/tmp/podman-extract/podman-${ver}/usr/bin/podman" podman
-                    install_binary "/tmp/podman-extract/podman-${ver}/usr/bin/podman-mac-helper" podman-mac-helper
-                    rm -rf /tmp/podman.zip /tmp/podman-extract
+                    curl -fsSL -o "$tmpdir/podman.zip" "https://github.com/containers/podman/releases/download/${PODMAN_VERSION}/podman-remote-release-darwin_${ARCH}.zip"
+                    verify_sha256 "$tmpdir/podman.zip" "$(remote_sha256 "https://github.com/containers/podman/releases/download/${PODMAN_VERSION}/shasums" "podman-remote-release-darwin_${ARCH}.zip")" podman
+                    unzip -q "$tmpdir/podman.zip" -d "$tmpdir/podman-extract"
+                    install_binary "$tmpdir/podman-extract/podman-${ver}/usr/bin/podman" podman
+                    install_binary "$tmpdir/podman-extract/podman-${ver}/usr/bin/podman-mac-helper" podman-mac-helper
                 else
                     # On Linux, Podman runs natively (no VM/machine) and needs rootless
                     # dependencies a single static binary can't provide. Defer to the
@@ -396,10 +400,13 @@ function install_dependencies {
 
             if ! command -v kind &>/dev/null; then
                 echo "Installing Kind ${KIND_VERSION}..."
-                curl -fsSL -o /tmp/kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-${OS}-${ARCH}"
-                verify_sha256 /tmp/kind "$(remote_sha256 "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-${OS}-${ARCH}.sha256sum" "kind-${OS}-${ARCH}")" kind
-                install_binary /tmp/kind kind
+                curl -fsSL -o "$tmpdir/kind" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-${OS}-${ARCH}"
+                verify_sha256 "$tmpdir/kind" "$(remote_sha256 "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-${OS}-${ARCH}.sha256sum" "kind-${OS}-${ARCH}")" kind
+                install_binary "$tmpdir/kind" kind
             fi
+
+            rm -rf "$tmpdir"
+            trap - EXIT
         fi
     fi
 }

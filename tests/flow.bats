@@ -255,3 +255,43 @@ CHART_STUB='helm(){ printf "%s\n" "NAME CHART_VERSION APP_VERSION DESC" "sumolog
     [ "$status" -eq 0 ]
     [ -z "$output" ] # no node image emitted -> caller uses kind's default
 }
+
+# --- install_dependencies (direct-download path uses a private scratch dir) --
+
+@test "install_dependencies: direct path downloads into a mktemp scratch dir, never /tmp, and cleans up" {
+    # Isolated subshell so the command/mktemp/curl overrides can't leak into bats.
+    # Force the no-brew direct path; report the CLIs absent so the install branches
+    # run, but docker "present" so the podman branch (which exits on Linux) is skipped.
+    run bash -c '
+        source "$1"; trap - ERR EXIT
+        scratch="$2"; calls="$3"
+        confirm() { return 1; }
+        command() {
+            if [ "$1" = "-v" ]; then
+                case "$2" in
+                    brew|jq|kubectl|helm|kind|podman) return 1 ;;
+                    docker) return 0 ;;
+                    *) builtin command "$@" ;;
+                esac
+            else builtin command "$@"; fi
+        }
+        mktemp() { mkdir -p "$scratch"; printf "%s\n" "$scratch"; }
+        curl() {
+            local out="" prev=""
+            for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done
+            [ -n "$out" ] && printf "#!/bin/sh\nexit 0\n" >"$out"
+            return 0
+        }
+        verify_sha256() { :; }
+        kubectl() { :; }
+        install_binary() { echo "install_binary $1" >>"$calls"; }
+        install_dependencies
+        [ -d "$scratch" ] && echo "SCRATCH_REMAINS" || echo "SCRATCH_GONE"
+    ' _ "$SCRIPT" "$BATS_TEST_TMPDIR/scratch" "$CALLS"
+    [ "$status" -eq 0 ]
+    assert_called 'install_binary .*/scratch/jq$'
+    assert_called 'install_binary .*/scratch/kubectl$'
+    assert_called 'install_binary .*/scratch/kind$'
+    refute_called 'install_binary /tmp/'
+    [[ "$output" == *"SCRATCH_GONE"* ]]
+}
