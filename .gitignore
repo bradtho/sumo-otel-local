@@ -8,6 +8,10 @@ sumologic-rendered.yaml
 # own `rm` runs (the ERR trap would exit first).
 install_homebrew.sh
 
+# Project-local config (sourced for repeatable runs). Commit .sumo-otel-local.env.example
+# instead; the real file may hold environment-specific settings.
+.sumo-otel-local.env
+
 # Note: the direct-install downloads for jq/kubectl/kind/helm/podman all go to
 # /tmp (then install_binary moves them onto PATH), so they never land in the repo
 # and don't need ignoring here.

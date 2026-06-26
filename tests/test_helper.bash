@@ -6,6 +6,12 @@
 
 SCRIPT="${BATS_TEST_DIRNAME}/../sumo-otel-local.sh"
 
+# Keep the suite hermetic: point the optional project-local config at /dev/null so a
+# developer's stray ./.sumo-otel-local.env can't leak into tests (it is `-f`-false, so
+# the script skips it). Subshells spawned via `bash -c` inherit this. The config tests
+# override SUMO_CONFIG_FILE explicitly.
+export SUMO_CONFIG_FILE=/dev/null
+
 # Source the script under test into the current shell.
 load_script() {
     # shellcheck disable=SC1090

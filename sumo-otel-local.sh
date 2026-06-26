@@ -61,6 +61,21 @@ else
     SECRET_BACKEND="env"
 fi
 
+# Optional project-local config for repeatable runs. A shell snippet of KEY=value lines
+# (no YAML parser needed); it is sourced with `set -a` BEFORE the constants below, so it
+# can set any env knob the script reads: CONTAINER_RUNTIME, CLUSTER_NAME, HELM_VALUES,
+# SUMO_CHART_VERSION, MIN_MEM_MB, MIN_CPU, ASSUME_YES. See .sumo-otel-local.env.example.
+# It deliberately CANNOT set FORCE (that is flag-only; reset below) and is not a place
+# for credentials. Path overridable via SUMO_CONFIG_FILE.
+SUMO_CONFIG_FILE="${SUMO_CONFIG_FILE:-./.sumo-otel-local.env}"
+if [[ -f "$SUMO_CONFIG_FILE" ]]; then
+    echo "Loading config from ${SUMO_CONFIG_FILE}" >&2
+    set -a
+    # shellcheck disable=SC1090
+    . "$SUMO_CONFIG_FILE"
+    set +a
+fi
+
 # Minimum Podman machine resources, overridable via the environment.
 MIN_MEM_MB="${MIN_MEM_MB:-18432}" # minimum memory in MiB
 MIN_CPU="${MIN_CPU:-4}"           # minimum vCPUs
@@ -96,8 +111,10 @@ SUMO_CHART_VERSION="${SUMO_CHART_VERSION:-5.2.0}"
 # release-please rewrite this line automatically when it cuts a release.
 VERSION="0.4.0" # x-release-please-version
 
-# Default KinD cluster name, used by create and teardown.
-DEFAULT_CLUSTER_NAME="sumo"
+# Default KinD cluster name, used by create and teardown. Honors a CLUSTER_NAME set in
+# the environment / config file, so every name prompt (which defaults to this) and the
+# teardown/status flows pick it up.
+DEFAULT_CLUSTER_NAME="${CLUSTER_NAME:-sumo}"
 
 # Chart overrides applied to EVERY install and render, so `-o`/--output mirrors what
 # `-i`/`-m` deploys. Single source of truth: both install_sumo and output append this,
@@ -752,7 +769,7 @@ function install_sumo {
     DEFAULT_HELM_VALUES="values.yaml"
     echo "A Helm values file is optional; the chart can install with --set values alone."
     echo "Example values live in the examples folder, e.g. examples/metrics_interval.yaml"
-    HELM_VALUES=$(ask "Path to a Helm values file (blank to skip) [default if present=${DEFAULT_HELM_VALUES}]: " "")
+    HELM_VALUES=$(ask "Path to a Helm values file (blank to skip) [default if present=${DEFAULT_HELM_VALUES}]: " "${HELM_VALUES:-}")
     # Blank falls back to the default file only when it actually exists.
     if [[ -z "$HELM_VALUES" && -f "$DEFAULT_HELM_VALUES" ]]; then
         HELM_VALUES="$DEFAULT_HELM_VALUES"
@@ -805,7 +822,7 @@ function output {
     DEFAULT_HELM_VALUES="values.yaml"
     DEFAULT_K8S_YAML="sumologic-rendered.yaml"
 
-    HELM_VALUES=$(ask "Path to a Helm values file (blank to skip) [default if present=${DEFAULT_HELM_VALUES}]: " "")
+    HELM_VALUES=$(ask "Path to a Helm values file (blank to skip) [default if present=${DEFAULT_HELM_VALUES}]: " "${HELM_VALUES:-}")
     if [[ -z "$HELM_VALUES" && -f "$DEFAULT_HELM_VALUES" ]]; then
         HELM_VALUES="$DEFAULT_HELM_VALUES"
     fi

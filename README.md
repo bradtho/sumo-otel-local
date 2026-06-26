@@ -132,6 +132,16 @@ CONTAINER_RUNTIME=docker MIN_MEM_MB=8192 MIN_CPU=2 \
   ./sumo-otel-local.sh -y -i
 ```
 
+### Project config file
+
+For repeatable runs, drop a **`.sumo-otel-local.env`** in your working directory and the
+script sources it on startup (it's plain shell — `KEY=value` lines, no YAML parser). It
+can set any of the knobs above (`CONTAINER_RUNTIME`, `CLUSTER_NAME`, `SUMO_CHART_VERSION`,
+`HELM_VALUES`, `MIN_MEM_MB`, `MIN_CPU`, `ASSUME_YES`) so you don't re-answer prompts.
+Copy [`.sumo-otel-local.env.example`](.sumo-otel-local.env.example) to get started; the
+real file is git-ignored. Point `SUMO_CONFIG_FILE` at another path, or `=/dev/null` to
+ignore it for a run. For safety it **cannot** enable `--force` or carry credentials.
+
 ## Credentials & secret storage
 
 Your Sumo Access ID/Key are stored once and reused on later runs. The backend is
