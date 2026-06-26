@@ -135,6 +135,27 @@ CONTAINER_RUNTIME=docker MIN_MEM_MB=8192 MIN_CPU=2 \
   ./sumo-otel-local.sh -y -i
 ```
 
+### Pinned tool versions
+
+The **direct-download** install path (the no-Homebrew fallback) pins each CLI to a
+known-good version so runs are reproducible and match what CI validates; every pin is
+overridable from the environment. Homebrew always installs its current formula, so
+these pins apply **only** to the direct-download path.
+
+| Tool                            | Pinned default                | Override env var     |
+| ------------------------------- | ----------------------------- | -------------------- |
+| `kubectl`                       | `v1.36.2`                     | `KUBECTL_VERSION`    |
+| `helm`                          | `v4.2.2`                      | `HELM_VERSION`       |
+| `kind`                          | `v0.32.0`                     | `KIND_VERSION`       |
+| `podman` (macOS direct install) | `v6.0.0`                      | `PODMAN_VERSION`     |
+| `sumologic/sumologic` chart     | `5.2.0`                       | `SUMO_CHART_VERSION` |
+| `kindest/node` (Kubernetes)     | kind's default for `v0.32.0`  | the version prompt   |
+
+CI installs the **same `helm`** as the script's `HELM_VERSION` (so render/dry-run match
+deployment), and [Renovate](#contributing) keeps these pins current via annotations next
+to each constant. The `kindest/node` image is still chosen interactively (or left to
+kind's default) — see [Kubernetes version](#kubernetes-version).
+
 ### Project config file
 
 For repeatable runs, drop a **`.sumo-otel-local.env`** in your working directory and the

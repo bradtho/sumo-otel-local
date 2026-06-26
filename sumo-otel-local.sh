@@ -107,6 +107,21 @@ fi
 # renovate: datasource=helm depName=sumologic registryUrl=https://sumologic.github.io/sumologic-kubernetes-collection
 SUMO_CHART_VERSION="${SUMO_CHART_VERSION:-5.2.0}"
 
+# Pinned versions for the CLIs the direct-download path installs (the no-Homebrew
+# fallback). Each is env-overridable (e.g. KIND_VERSION=v0.30.0) and tracked by
+# Renovate via the annotations below. Pinning replaces the old "latest"/"stable"
+# lookups — including their unauthenticated GitHub API calls — so direct installs are
+# reproducible and match the toolchain CI validates. NOTE: the Homebrew path always
+# installs brew's current formula; these pins apply only to the direct-download path.
+# renovate: datasource=github-releases depName=kubernetes/kubernetes
+KUBECTL_VERSION="${KUBECTL_VERSION:-v1.36.2}"
+# renovate: datasource=github-releases depName=helm/helm
+HELM_VERSION="${HELM_VERSION:-v4.2.2}"
+# renovate: datasource=github-releases depName=kubernetes-sigs/kind
+KIND_VERSION="${KIND_VERSION:-v0.32.0}"
+# renovate: datasource=github-releases depName=containers/podman
+PODMAN_VERSION="${PODMAN_VERSION:-v6.0.0}"
+
 # Script version. Kept in sync with the published GitHub Release tag; printed by
 # -v/--version without any network calls. The trailing annotation lets
 # release-please rewrite this line automatically when it cuts a release.
@@ -291,6 +306,9 @@ function install_dependencies {
 
     if command -v brew &>/dev/null; then
         echo "Installing Dependencies with Homebrew..."
+        # Homebrew always installs the current formula version; the KIND_VERSION /
+        # KUBECTL_VERSION / HELM_VERSION / PODMAN_VERSION pins apply only to the
+        # direct-download fallback below, so brew pinning is best-effort (none here).
         # Only install a container runtime when the user has neither already.
         local brew_pkgs=(jq kubectl helm kind)
         if ! command -v docker &>/dev/null && ! command -v podman &>/dev/null; then
@@ -306,7 +324,7 @@ function install_dependencies {
             install_dependencies
         else
             echo "Installing Dependencies Directly..."
-            local release jq_base kver
+            local jq_base ver
             if ! command -v jq &>/dev/null; then
                 echo "Installing jq..."
                 jq_base="https://github.com/jqlang/jq/releases/download/jq-1.7.1"
@@ -316,36 +334,38 @@ function install_dependencies {
             fi
 
             if ! command -v kubectl &>/dev/null; then
-                echo "Installing Kubectl..."
-                kver=$(curl -fsSL https://dl.k8s.io/release/stable.txt)
-                curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/${kver}/bin/${OS}/${ARCH}/kubectl"
-                verify_sha256 /tmp/kubectl "$(remote_sha256 "https://dl.k8s.io/release/${kver}/bin/${OS}/${ARCH}/kubectl.sha256")" kubectl
+                echo "Installing Kubectl ${KUBECTL_VERSION}..."
+                curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/${OS}/${ARCH}/kubectl"
+                verify_sha256 /tmp/kubectl "$(remote_sha256 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/${OS}/${ARCH}/kubectl.sha256")" kubectl
                 install_binary /tmp/kubectl kubectl
                 kubectl version --client
             fi
 
             if ! command -v helm &>/dev/null; then
-                echo "Installing Helm..."
+                echo "Installing Helm ${HELM_VERSION}..."
                 # get-helm-3 verifies the downloaded helm tarball against its published
-                # SHA-256 itself, so the binary is checksum-checked. (The script is
-                # fetched from a mutable master ref — pinning that is a separate item.)
+                # SHA-256 itself, so the binary is checksum-checked; DESIRED_VERSION pins
+                # which helm version it installs. (The script is fetched from a mutable
+                # master ref — pinning that is a separate item.)
                 curl -fsSL -o /tmp/get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
                 chmod 700 /tmp/get_helm.sh
-                /tmp/get_helm.sh
+                DESIRED_VERSION="$HELM_VERSION" /tmp/get_helm.sh
                 rm -f /tmp/get_helm.sh
             fi
 
             # Only auto-install a runtime when the user has neither Docker nor Podman.
             if ! command -v docker &>/dev/null && ! command -v podman &>/dev/null; then
-                echo "Installing Podman..."
+                echo "Installing Podman ${PODMAN_VERSION}..."
                 if [[ "$OS" == "darwin" ]]; then
-                    release=$(curl -fsSL https://api.github.com/repos/containers/podman/releases/latest | jq -r .tag_name)
-                    curl -fsSL -o /tmp/podman.zip "https://github.com/containers/podman/releases/download/${release}/podman-remote-release-darwin_${ARCH}.zip"
-                    verify_sha256 /tmp/podman.zip "$(remote_sha256 "https://github.com/containers/podman/releases/download/${release}/shasums" "podman-remote-release-darwin_${ARCH}.zip")" podman
+                    # The release tag carries a leading 'v' (used in the URL); the zip's
+                    # internal directory does not (podman-6.0.0/, not podman-v6.0.0/).
+                    ver="${PODMAN_VERSION#v}"
+                    curl -fsSL -o /tmp/podman.zip "https://github.com/containers/podman/releases/download/${PODMAN_VERSION}/podman-remote-release-darwin_${ARCH}.zip"
+                    verify_sha256 /tmp/podman.zip "$(remote_sha256 "https://github.com/containers/podman/releases/download/${PODMAN_VERSION}/shasums" "podman-remote-release-darwin_${ARCH}.zip")" podman
                     rm -rf /tmp/podman-extract
                     unzip -q /tmp/podman.zip -d /tmp/podman-extract
-                    install_binary "/tmp/podman-extract/podman-${release}/usr/bin/podman" podman
-                    install_binary "/tmp/podman-extract/podman-${release}/usr/bin/podman-mac-helper" podman-mac-helper
+                    install_binary "/tmp/podman-extract/podman-${ver}/usr/bin/podman" podman
+                    install_binary "/tmp/podman-extract/podman-${ver}/usr/bin/podman-mac-helper" podman-mac-helper
                     rm -rf /tmp/podman.zip /tmp/podman-extract
                 else
                     # On Linux, Podman runs natively (no VM/machine) and needs rootless
@@ -360,10 +380,9 @@ function install_dependencies {
             fi
 
             if ! command -v kind &>/dev/null; then
-                echo "Installing Kind..."
-                release=$(curl -fsSL https://api.github.com/repos/kubernetes-sigs/kind/releases/latest | jq -r .tag_name)
-                curl -fsSL -o /tmp/kind "https://kind.sigs.k8s.io/dl/${release}/kind-${OS}-${ARCH}"
-                verify_sha256 /tmp/kind "$(remote_sha256 "https://github.com/kubernetes-sigs/kind/releases/download/${release}/kind-${OS}-${ARCH}.sha256sum" "kind-${OS}-${ARCH}")" kind
+                echo "Installing Kind ${KIND_VERSION}..."
+                curl -fsSL -o /tmp/kind "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-${OS}-${ARCH}"
+                verify_sha256 /tmp/kind "$(remote_sha256 "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-${OS}-${ARCH}.sha256sum" "kind-${OS}-${ARCH}")" kind
                 install_binary /tmp/kind kind
             fi
         fi

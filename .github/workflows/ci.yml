@@ -132,12 +132,18 @@ jobs:
           source ./sumo-otel-local.sh; trap - ERR EXIT
           [[ -n "$SUMO_CHART_VERSION" ]] || { echo "Could not read SUMO_CHART_VERSION"; exit 1; }
           [[ "${#SUMO_COMMON_SET[@]}" -gt 0 ]] || { echo "Could not read SUMO_COMMON_SET"; exit 1; }
+          [[ -n "$HELM_VERSION" ]] || { echo "Could not read HELM_VERSION"; exit 1; }
           echo "CHART_VERSION=$SUMO_CHART_VERSION" >> "$GITHUB_ENV"
           echo "COMMON_SET=${SUMO_COMMON_SET[*]}" >> "$GITHUB_ENV"
-          echo "Chart $SUMO_CHART_VERSION; common overrides: ${SUMO_COMMON_SET[*]}"
+          echo "HELM_VERSION=$HELM_VERSION" >> "$GITHUB_ENV"
+          echo "Chart $SUMO_CHART_VERSION; helm $HELM_VERSION; common overrides: ${SUMO_COMMON_SET[*]}"
 
+      # Pin helm to the same version the script pins (HELM_VERSION), so CI renders and
+      # dry-runs with exactly the helm users get from the direct-download path.
       - name: Install Helm
         uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
 
       - name: Install kubeconform
         run: |

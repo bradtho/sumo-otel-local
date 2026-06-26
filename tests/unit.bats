@@ -87,3 +87,13 @@ setup() {
     MIN_CPU=2 run bash -c 'source "$1"; echo "$MIN_CPU"' _ "$SCRIPT"
     [ "$output" = "2" ]
 }
+
+@test "runtime tool versions default to their pins" {
+    run bash -c 'source "$1"; echo "$KUBECTL_VERSION $HELM_VERSION $KIND_VERSION $PODMAN_VERSION"' _ "$SCRIPT"
+    [ "$output" = "v1.36.2 v4.2.2 v0.32.0 v6.0.0" ]
+}
+
+@test "runtime tool versions are overridable via the environment" {
+    KIND_VERSION=v0.30.0 KUBECTL_VERSION=v1.30.0 run bash -c 'source "$1"; echo "$KUBECTL_VERSION $KIND_VERSION"' _ "$SCRIPT"
+    [ "$output" = "v1.30.0 v0.30.0" ]
+}

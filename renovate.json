@@ -25,15 +25,22 @@
       "matchDepNames": ["sumologic"],
       "matchDatasources": ["helm"],
       "addLabels": ["chart-update"]
+    },
+    {
+      "description": "Group the runtime CLI pins installed by the direct-download path (kubectl, helm, kind, podman) into one PR. Major bumps still split out by default.",
+      "matchManagers": ["custom.regex"],
+      "matchDepNames": ["kubernetes/kubernetes", "helm/helm", "kubernetes-sigs/kind", "containers/podman"],
+      "groupName": "kubernetes tooling"
     }
   ],
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Track the pinned sumologic/sumologic Helm chart version in sumo-otel-local.sh.",
+      "description": "Track the pinned Helm chart and runtime CLI versions in sumo-otel-local.sh.",
       "managerFilePatterns": ["/^sumo-otel-local\\.sh$/"],
       "matchStrings": [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) registryUrl=(?<registryUrl>\\S+)\\s+SUMO_CHART_VERSION=\"\\$\\{SUMO_CHART_VERSION:-(?<currentValue>[^\"}]+)\\}\""
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) registryUrl=(?<registryUrl>\\S+)\\s+SUMO_CHART_VERSION=\"\\$\\{SUMO_CHART_VERSION:-(?<currentValue>[^\"}]+)\\}\"",
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+_VERSION=\"\\$\\{\\w+:-(?<currentValue>[^\"}]+)\\}\""
       ]
     },
     {
