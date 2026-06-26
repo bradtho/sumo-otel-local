@@ -33,9 +33,12 @@ jobs:
       - name: Install shfmt (pinned)
         shell: bash
         run: |
+          # renovate: datasource=github-releases depName=mvdan/sh
           SHFMT_VERSION=v3.13.1
           # shfmt publishes no checksum file, so the per-asset SHA-256 digests are
-          # pinned here and verified before the binary is placed on PATH.
+          # pinned here and verified before the binary is placed on PATH. Renovate
+          # bumps SHFMT_VERSION but CANNOT refresh these digests — update all four in
+          # the same PR (until then the checksum check below fails closed).
           case "${{ runner.os }}-${{ runner.arch }}" in
             Linux-X64)    asset=linux_amd64;  sha=fb096c5d1ac6beabbdbaa2874d025badb03ee07929f0c9ff67563ce8c75398b1 ;;
             Linux-ARM64)  asset=linux_arm64;  sha=32d92acaa5cd8abb29fc49dac123dc412442d5713967819d8af2c29f1b3857c7 ;;
@@ -138,10 +141,12 @@ jobs:
 
       - name: Install kubeconform
         run: |
+          # renovate: datasource=github-releases depName=yannh/kubeconform
           KUBECONFORM_VERSION=v0.7.0
           base="https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}"
           curl -fsSL -o /tmp/kubeconform.tar.gz "${base}/kubeconform-linux-amd64.tar.gz"
-          # Verify against the release's published CHECKSUMS before extracting.
+          # Verify against the release's published CHECKSUMS before extracting (fetched
+          # per-version, so a Renovate bump of KUBECONFORM_VERSION self-verifies).
           expected=$(curl -fsSL "${base}/CHECKSUMS" | awk '$2=="kubeconform-linux-amd64.tar.gz"{print $1}')
           echo "${expected}  /tmp/kubeconform.tar.gz" | sha256sum -c -
           tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform

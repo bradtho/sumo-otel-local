@@ -104,6 +104,7 @@ if [[ -n "${SUMO_CHART_VERSION+x}" ]]; then
 else
     CHART_VERSION_FROM_ENV=""
 fi
+# renovate: datasource=helm depName=sumologic registryUrl=https://sumologic.github.io/sumologic-kubernetes-collection
 SUMO_CHART_VERSION="${SUMO_CHART_VERSION:-5.2.0}"
 
 # Script version. Kept in sync with the published GitHub Release tag; printed by

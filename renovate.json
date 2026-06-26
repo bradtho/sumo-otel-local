@@ -1,0 +1,48 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":semanticCommitTypeAll(chore)",
+    "schedule:weekly"
+  ],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "description": "Group all GitHub Actions bumps (checkout, setup-helm, kind-action, release-please) into one PR.",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    },
+    {
+      "description": "Group the CI binary tools into one PR. NOTE: shfmt's per-asset SHA-256 digests in ci.yml are NOT auto-updated by Renovate — refresh all four in the same PR (the checksum step fails closed until you do). kubeconform fetches CHECKSUMS per-version, so it self-verifies.",
+      "matchManagers": ["custom.regex"],
+      "matchDepNames": ["mvdan/sh", "yannh/kubeconform"],
+      "groupName": "ci tooling"
+    },
+    {
+      "description": "The pinned sumologic/sumologic Helm chart, kept as its own PR. The mock-deploy job re-renders every values file against the bumped version, so a breaking chart change turns that required check red before merge.",
+      "matchManagers": ["custom.regex"],
+      "matchDepNames": ["sumologic"],
+      "matchDatasources": ["helm"],
+      "addLabels": ["chart-update"]
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track the pinned sumologic/sumologic Helm chart version in sumo-otel-local.sh.",
+      "managerFilePatterns": ["/^sumo-otel-local\\.sh$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) registryUrl=(?<registryUrl>\\S+)\\s+SUMO_CHART_VERSION=\"\\$\\{SUMO_CHART_VERSION:-(?<currentValue>[^\"}]+)\\}\""
+      ]
+    },
+    {
+      "customType": "regex",
+      "description": "Track the shfmt and kubeconform versions pinned in the CI workflow.",
+      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+_VERSION=(?<currentValue>v[0-9]\\S*)"
+      ]
+    }
+  ]
+}
