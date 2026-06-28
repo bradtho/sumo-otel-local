@@ -335,6 +335,12 @@ corrected during implementation).
 
 ### CI / quality (complete)
 
+- [x] **Unblocked the release PR's CI** (2026-06-29) — the first release-please PR
+  (`0.4.1`) failed two ways: (1) the `-v` arg test hardcoded `sumo-otel-local 0.4.0`, so
+  the `VERSION` bump to `0.4.1` broke it — fixed by deriving the expected string from the
+  script's `VERSION` constant (a version bump can never break it again); (2) the macOS
+  `brew install` (Lint/Tests) aborted on Homebrew's new tap-trust check against the
+  runner's preinstalled `aws/tap` — fixed with a workflow-level `HOMEBREW_NO_REQUIRE_TAP_TRUST=1`.
 - [x] **Release automation** (`release-please`) — a `release-please.yml` workflow with
   `release-please-config.json` and `.release-please-manifest.json`. On each push to `main`
   it maintains a release PR whose version/`CHANGELOG.md` are derived from the Conventional-

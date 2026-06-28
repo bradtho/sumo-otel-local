@@ -41,10 +41,14 @@ run_main() {
     [[ "$output" != *"SUMO_RAN"* ]]
 }
 
-@test "-v prints the version and exits 0" {
+@test "-v prints the script VERSION and exits 0" {
     run bash -c 'source "$1"; main -v' _ "$SCRIPT"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"sumo-otel-local 0.4.0"* ]]
+    # Derive the expected string from the script's VERSION constant rather than
+    # hardcoding a number, so a release-please version bump doesn't break this test.
+    local want
+    want=$(bash -c 'source "$1"; printf "sumo-otel-local %s" "$VERSION"' _ "$SCRIPT")
+    [[ "$output" == *"$want"* ]]
 }
 
 @test "-h prints usage and exits 0, even alongside an action (help wins)" {

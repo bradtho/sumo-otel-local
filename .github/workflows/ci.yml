@@ -8,6 +8,13 @@ on:
 permissions:
   contents: read
 
+# The GitHub macOS runner preinstalls third-party taps (e.g. aws/tap) that trip
+# Homebrew's tap-trust check and abort `brew install` on the Lint/Tests macOS jobs.
+# These are GitHub's own preinstalled taps, so disable the check in CI. (The flag is
+# deprecated upstream — revisit if a future Homebrew drops it; harmless on Linux.)
+env:
+  HOMEBREW_NO_REQUIRE_TAP_TRUST: 1
+
 jobs:
   lint:
     name: Lint (${{ matrix.os }})
