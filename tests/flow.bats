@@ -120,48 +120,50 @@ setup() {
     [[ "$output" != *"Next steps"* ]]
 }
 
+# NB: helm's stdout is piped into `| tee`, so a `helm(){ echo MARKER;}` stub's output
+# never reaches $output. Signal "helm ran" by writing a marker FILE via redirection
+# (survives the pipe), mirroring the arg-capture test below. (Asserting on $output here
+# would silently pass under macOS's bats, which only checks a test's last command, yet
+# fail under Linux's bats, which fails on any command.)
 @test "output: declining the overwrite of an existing render aborts before rendering" {
-    local kfile="${BATS_TEST_TMPDIR}/out.yaml"
+    local kfile="${BATS_TEST_TMPDIR}/out.yaml" ran="${BATS_TEST_TMPDIR}/helm_ran"
     : >"$kfile" # pre-existing render
-    run bash -c 'source "$1"; kfile="$2"
+    run bash -c 'source "$1"; kfile="$2"; ran="$3"
         require_cmd(){ :;}; require_values_file(){ :;}
-        ensure_helm_repo(){ echo REPO_RAN;}; select_chart_version(){ echo CHART_RAN; printf 5.2.0;}
+        ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
         ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *) printf "";; esac; }
         confirm(){ return 1; }       # user declines the overwrite
-        tee(){ echo TEE_RAN; cat >/dev/null;}; helm(){ echo HELM_RAN;}
-        ASSUME_YES=""; output </dev/null' _ "$SCRIPT" "$kfile"
+        tee(){ cat >/dev/null;}; helm(){ echo ran >"$ran";}
+        ASSUME_YES=""; output </dev/null' _ "$SCRIPT" "$kfile" "$ran"
     [ "$status" -eq 0 ]
     [[ "$output" == *"Aborted"* ]]
-    # Aborted before any of the expensive/clobbering work.
-    [[ "$output" != *"REPO_RAN"* ]]
-    [[ "$output" != *"HELM_RAN"* ]]
-    [[ "$output" != *"TEE_RAN"* ]]
+    [ ! -e "$ran" ] # aborted before helm ran (no clobbering work)
 }
 
 @test "output: -y/ASSUME_YES auto-overwrites an existing render (regenerable artifact)" {
-    local kfile="${BATS_TEST_TMPDIR}/out.yaml"
+    local kfile="${BATS_TEST_TMPDIR}/out.yaml" ran="${BATS_TEST_TMPDIR}/helm_ran"
     : >"$kfile" # pre-existing render
-    run bash -c 'source "$1"; kfile="$2"
+    run bash -c 'source "$1"; kfile="$2"; ran="$3"
         require_cmd(){ :;}; require_values_file(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
         ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *) printf "";; esac; }
-        tee(){ cat >/dev/null;}; helm(){ echo HELM_RAN;}
-        ASSUME_YES=yes; output' _ "$SCRIPT" "$kfile"
+        tee(){ cat >/dev/null;}; helm(){ echo ran >"$ran";}
+        ASSUME_YES=yes; output' _ "$SCRIPT" "$kfile" "$ran"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"HELM_RAN"* ]] # render proceeded
     [[ "$output" != *"Aborted"* ]]
+    [ -s "$ran" ] # render proceeded (helm ran) -> -y auto-overwrote
 }
 
 @test "output: no overwrite prompt when the target file does not exist" {
-    local kfile="${BATS_TEST_TMPDIR}/new.yaml" # does NOT exist
-    run bash -c 'source "$1"; kfile="$2"
+    local kfile="${BATS_TEST_TMPDIR}/new.yaml" ran="${BATS_TEST_TMPDIR}/helm_ran" # kfile does NOT exist
+    run bash -c 'source "$1"; kfile="$2"; ran="$3"
         require_cmd(){ :;}; require_values_file(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
         ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *) printf "";; esac; }
         confirm(){ echo CONFIRM_CALLED; return 0;}
-        tee(){ cat >/dev/null;}; helm(){ echo HELM_RAN;}
-        ASSUME_YES=""; output </dev/null' _ "$SCRIPT" "$kfile"
+        tee(){ cat >/dev/null;}; helm(){ echo ran >"$ran";}
+        ASSUME_YES=""; output </dev/null' _ "$SCRIPT" "$kfile" "$ran"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"HELM_RAN"* ]]
     [[ "$output" != *"CONFIRM_CALLED"* ]] # the `-e` short-circuit skips confirm entirely
+    [ -s "$ran" ]                         # render still proceeded
 }
 
 @test "output: mirrors install (version + clusterName + overrides) with placeholder creds off-argv" {
