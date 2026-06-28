@@ -120,6 +120,50 @@ setup() {
     [[ "$output" != *"Next steps"* ]]
 }
 
+@test "output: declining the overwrite of an existing render aborts before rendering" {
+    local kfile="${BATS_TEST_TMPDIR}/out.yaml"
+    : >"$kfile" # pre-existing render
+    run bash -c 'source "$1"; kfile="$2"
+        require_cmd(){ :;}; require_values_file(){ :;}
+        ensure_helm_repo(){ echo REPO_RAN;}; select_chart_version(){ echo CHART_RAN; printf 5.2.0;}
+        ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *) printf "";; esac; }
+        confirm(){ return 1; }       # user declines the overwrite
+        tee(){ echo TEE_RAN; cat >/dev/null;}; helm(){ echo HELM_RAN;}
+        ASSUME_YES=""; output </dev/null' _ "$SCRIPT" "$kfile"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Aborted"* ]]
+    # Aborted before any of the expensive/clobbering work.
+    [[ "$output" != *"REPO_RAN"* ]]
+    [[ "$output" != *"HELM_RAN"* ]]
+    [[ "$output" != *"TEE_RAN"* ]]
+}
+
+@test "output: -y/ASSUME_YES auto-overwrites an existing render (regenerable artifact)" {
+    local kfile="${BATS_TEST_TMPDIR}/out.yaml"
+    : >"$kfile" # pre-existing render
+    run bash -c 'source "$1"; kfile="$2"
+        require_cmd(){ :;}; require_values_file(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
+        ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *) printf "";; esac; }
+        tee(){ cat >/dev/null;}; helm(){ echo HELM_RAN;}
+        ASSUME_YES=yes; output' _ "$SCRIPT" "$kfile"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"HELM_RAN"* ]] # render proceeded
+    [[ "$output" != *"Aborted"* ]]
+}
+
+@test "output: no overwrite prompt when the target file does not exist" {
+    local kfile="${BATS_TEST_TMPDIR}/new.yaml" # does NOT exist
+    run bash -c 'source "$1"; kfile="$2"
+        require_cmd(){ :;}; require_values_file(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
+        ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *) printf "";; esac; }
+        confirm(){ echo CONFIRM_CALLED; return 0;}
+        tee(){ cat >/dev/null;}; helm(){ echo HELM_RAN;}
+        ASSUME_YES=""; output </dev/null' _ "$SCRIPT" "$kfile"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"HELM_RAN"* ]]
+    [[ "$output" != *"CONFIRM_CALLED"* ]] # the `-e` short-circuit skips confirm entirely
+}
+
 @test "output: mirrors install (version + clusterName + overrides) with placeholder creds off-argv" {
     # Capture helm's argv to a file (via a closure) so the assertion doesn't depend on
     # the `helm | tee` pipe's stdout, which behaves differently across platforms.

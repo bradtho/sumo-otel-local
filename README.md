@@ -90,6 +90,12 @@ environment); like `-y`, it can go before or after the action:
 Without `--force`, `-y -p` refuses and exits non-zero. Run `-u`/`-p` with no flags for
 the normal interactive confirm + type-the-cluster-name guard.
 
+`-o`/`--output` won't silently clobber an existing render either: if the target file
+already exists it prompts before overwriting (declining leaves the file untouched and
+exits cleanly). Because the rendered manifest is a **regenerable artifact** rather than
+irreversible state, `-y`/`ASSUME_YES` here **does** auto-overwrite it — the deliberate
+opposite of the teardown rule above.
+
 ## Checking status
 
 `-s`/`--status` is a **read-only** doctor command — it changes nothing and reports:

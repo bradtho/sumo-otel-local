@@ -936,6 +936,16 @@ function output {
     CLUSTER_NAME=$(ask "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
     K8S_YAML=$(ask "Name and Location of the rendered Kubernetes Manifest YAML file. [default=sumologic-rendered.yaml]: " "$DEFAULT_K8S_YAML")
 
+    # Don't silently clobber an existing render. confirm() honours -y/ASSUME_YES
+    # (auto-overwrite) — acceptable here because the output file is a regenerable
+    # artifact, not irreversible state like a cluster teardown (which routes through
+    # confirm_destructive instead). Checked before the helm work so a declined
+    # overwrite costs nothing and leaves the file untouched.
+    if [[ -e "$K8S_YAML" ]] && ! confirm "File '${K8S_YAML}' already exists. Overwrite?" n; then
+        echo "Aborted; '${K8S_YAML}' left unchanged." >&2
+        exit 0
+    fi
+
     # The chart is referenced as sumologic/sumologic, so the repo must be registered.
     ensure_helm_repo
 
