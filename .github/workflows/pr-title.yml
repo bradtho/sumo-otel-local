@@ -1,0 +1,53 @@
+name: PR Title
+
+# Lints the pull-request title against the Conventional-Commits convention
+# (CONTRIBUTING.md "Commit convention"). Because main squash-merges, the PR title
+# becomes the commit subject release-please reads to derive the next version and
+# CHANGELOG — so the title is the exact string that must follow the convention.
+# This check guards that one string; per-commit hooks would be redundant since
+# dev commits are squashed away and never reach main.
+#
+# To make it gating: add the job's check ("Validate PR title") to main's branch
+# ruleset under required status checks. Until then this reports but does not block.
+on:
+  pull_request:
+    # `edited` is essential — it re-runs when only the title (or body) changes, so a
+    # title fix clears the check without a new push. `synchronize` re-runs on new
+    # commits and `reopened` covers a reopen; together they keep the status current.
+    types: [opened, edited, synchronize, reopened]
+
+# Read-only: the action only needs to read the PR title to set its own job status.
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate:
+    name: Validate PR title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # These allowed types MUST mirror the table in CONTRIBUTING.md (Commit
+          # convention). tests/meta.bats fails if the two lists drift apart.
+          # release-please only bumps on feat/fix; the rest are non-releasing.
+          types: |
+            feat
+            fix
+            perf
+            docs
+            refactor
+            test
+            build
+            ci
+            chore
+            style
+          # Scope is optional and freeform here (CONTRIBUTING.md lists example scopes
+          # like runtime/secrets/helm/kind/ci/docs but does not restrict them), so do
+          # not require a scope or enumerate an allow-list.
+          requireScope: false
+          # The action natively parses the `!` breaking-change marker (feat!:,
+          # fix(scope)!:), so titles flagging a breaking change still validate.

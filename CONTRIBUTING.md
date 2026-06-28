@@ -12,6 +12,9 @@ automated (see the "Release automation" item in [TODO.md](TODO.md)).
   tooling reads — therefore **the PR title is the part that must follow the commit
   convention below.** Individual commits on `dev` are encouraged to follow it too,
   but they are squashed away and are not gating.
+- A CI check — **Validate PR title** ([`.github/workflows/pr-title.yml`](.github/workflows/pr-title.yml))
+  — lints the PR title against the type table below on every title edit, so a
+  non-conforming title is caught before merge rather than corrupting the release notes.
 - After a squash-merge, `dev` is reset onto `main` so it stays a clean base.
 
 ## Commit convention — Conventional Commits
