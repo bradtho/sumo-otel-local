@@ -68,15 +68,25 @@ Options:
                   (also via the ASSUME_YES env var; --non-interactive is an alias)
   -f, --force     Confirm destructive teardown (-u/-p) non-interactively.
                   Required for -u/-p under -y; never read from the environment.
+      --dry-run   Preview the install flow (-i/-n/-m): print the cluster-create and
+                  helm commands without creating/installing anything.
+  -V, --verbose   Echo each external command (kind/helm/podman) before running it.
 ```
 
 Exactly one **action** (`-i`/`-n`/`-m`/`-r`/`-o`/`-s`/`-e`/`--forward`/`-p`/`-u`/`-v`) is run per invocation;
 giving two different actions is rejected with a clear error, and `-h`/`--help` always
-wins. `-y`/`--yes` and `-f`/`--force` are **modifiers** and are order-independent —
-combine either with an action in any order, e.g. `./sumo-otel-local.sh -y -i` or
-`./sumo-otel-local.sh -i -y`. Short flags may also be **clustered**, so `-yi` is
+wins. `-y`/`--yes`, `-f`/`--force`, `--dry-run`, and `-V`/`--verbose` are **modifiers** and
+are order-independent — combine any with an action in any order, e.g. `./sumo-otel-local.sh -y -i`
+or `./sumo-otel-local.sh -i -y`. Short flags may also be **clustered**, so `-yi` is
 equivalent to `-y -i`. In unattended mode the Sumo credentials **must** come from
 secret storage or the environment (the script will not block on a prompt).
+
+`--dry-run` previews the install flow without changing anything: `init_cluster` prints the
+`kind create` it would run, and `install_sumo` prints the assembled `helm upgrade --install …`
+command (with `--dry-run` appended, so it's a ready-to-run validation command) and installs
+nothing. It applies only to `-i`/`-n`/`-m`; using it with another action is rejected (so it
+can never silently skip a teardown). `-V`/`--verbose` echoes each external command (kind /
+helm / podman) as `+ <command>` on stderr before running it — useful for CI logs.
 
 ### Destructive teardown requires `--force` when unattended
 

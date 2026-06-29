@@ -137,6 +137,27 @@ run_main() {
     [[ "$output" == *"PURGE_RAN f=yes"* ]]
 }
 
+@test "--dry-run and -V/--verbose are modifiers, combinable with an install-flow action" {
+    run_main --dry-run -n
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"INIT_RAN"* ]]
+    run_main -V -i
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"SUMO_RAN"* ]]
+}
+
+@test "--dry-run is refused for EVERY non-install action (the only guard against e.g. --dry-run -u deleting)" {
+    # The guard is the sole thing stopping --dry-run -u/-p from running a real teardown
+    # (uninstall/purge don't honor DRY_RUN), so pin the refusal for all of them. Failures
+    # accumulate into $bad; the load-bearing assertion is last (robust on macOS + Linux bats).
+    local act bad=""
+    for act in -u -p -r -o -s --forward; do
+        run_main --dry-run "$act"
+        { [ "$status" -eq 1 ] && [[ "$output" == *"only applies to the install flow"* ]] && [[ "$output" != *_RAN* ]]; } || bad="$bad $act"
+    done
+    [ -z "$bad" ] # every non-install action refused --dry-run before dispatching
+}
+
 @test "long flags and aliases work (--non-interactive --install)" {
     run_main --non-interactive --install
     [ "$status" -eq 0 ]

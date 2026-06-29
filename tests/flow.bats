@@ -121,6 +121,43 @@ setup() {
     [[ "$output" != *"Next steps"* ]]
 }
 
+# --- --dry-run / --verbose (install flow) -----------------------------------
+
+@test "install_sumo --dry-run: previews the helm command and installs nothing" {
+    run bash -c 'source "$1"; require_cmd(){ :;}; ensure_helm_repo(){ :;}; secret_get(){ printf S;}; select_chart_version(){ printf 5.2.0;}
+        helm(){ echo HELM_RAN; }; DRY_RUN=yes; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[dry-run] would run: helm upgrade --install"* ]]
+    [[ "$output" == *"--dry-run"* ]]  # helm's own dry-run appended to the previewed command
+    [[ "$output" != *"Next steps"* ]] # success path skipped
+    [[ "$output" != *"HELM_RAN"* ]]   # real helm never executed (asserted last)
+}
+
+@test "install_sumo --verbose: echoes the helm command before running it" {
+    run bash -c 'source "$1"; require_cmd(){ :;}; ensure_helm_repo(){ :;}; secret_get(){ printf S;}; select_chart_version(){ printf 5.2.0;}
+        helm(){ echo HELM_RAN; }; VERBOSE=yes; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"+ helm upgrade --install"* ]] # echoed
+    [[ "$output" == *"HELM_RAN"* ]]                 # and actually run
+}
+
+@test "init_cluster --dry-run: previews the kind create without touching the runtime or creating a cluster" {
+    # No runtime stubs on purpose: the dry-run early-return must skip select_runtime /
+    # ensure_*_ready entirely. If it regressed, the REAL select_runtime would run here.
+    run bash -c 'source "$1"; kind(){ echo "KIND_RAN $*"; }; DRY_RUN=yes; ASSUME_YES=yes; init_cluster' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"KIND_RAN"* ]] # no real cluster created
+    [[ "$output" == *"[dry-run] would run: kind create"* ]] # previewed (asserted last)
+}
+
+@test "uninstall --verbose echoes the kind delete before running it" {
+    run bash -c 'source "$1"; require_cmd(){ :;}; select_runtime(){ CONTAINER_RUNTIME=docker; return 0; }; set_kind_provider(){ :; }
+        kind(){ echo KIND_RAN; }; VERBOSE=yes; FORCE=yes; uninstall' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"KIND_RAN"* ]]                          # real delete still runs
+    [[ "$output" == *"+ kind delete cluster --name sumo"* ]] # ...and is echoed under --verbose
+}
+
 # --- reinstall (uninstall the release, then install_sumo) -------------------
 
 @test "reinstall: declining the confirm aborts without uninstalling or installing" {

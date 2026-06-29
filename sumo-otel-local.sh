@@ -24,6 +24,9 @@ function help {
     echo "                  (also via the ASSUME_YES env var; --non-interactive is an alias)"
     echo "  -f, --force     Confirm destructive teardown (-u/-p) non-interactively."
     echo "                  Required for -u/-p under -y; never read from the environment."
+    echo "      --dry-run   Preview the install flow (-i/-n/-m): print the cluster-create and"
+    echo "                  helm commands without creating/installing anything."
+    echo "  -V, --verbose   Echo each external command (kind/helm/podman) before running it."
     echo
     echo "Short flags may be combined, e.g. -yi is the same as -y -i."
 }
@@ -181,6 +184,12 @@ ASSUME_YES="${ASSUME_YES:-}"
 # can't trigger an irreversible wipe. See confirm_destructive().
 FORCE=""
 
+# Flag-only modifiers (never read from the environment, so a stray env var can't silently
+# turn a real install into a no-op or change output): --dry-run previews the install flow
+# without running the side-effecting steps; -V/--verbose echoes external commands as run.
+DRY_RUN=""
+VERBOSE=""
+
 # Ask a yes/no question. $1=prompt, $2=default (y|n, default n). Returns 0 for yes.
 # In unattended mode (ASSUME_YES) it answers yes without prompting.
 function confirm {
@@ -285,6 +294,15 @@ function require_cmd {
     fi
 }
 
+# Run an external command, echoing it first under -V/--verbose. The echo goes to stderr
+# (so captured stdout stays clean) and shows the temp-values-file path, not credentials.
+# NB: named run_cmd, not run, to avoid clobbering bats-core's `run` when the test suite
+# sources this script.
+function run_cmd {
+    [[ -n "$VERBOSE" ]] && echo "+ $*" >&2
+    "$@"
+}
+
 # Pick a directory for direct binary installs: prefer a writable dir already on
 # PATH; otherwise fall back to /usr/local/bin (written via sudo).
 function install_bin_dir {
@@ -363,6 +381,11 @@ function verify_sha256 {
 
 # Check Dependencies
 function install_dependencies {
+    # --dry-run previews the install flow without side effects, so don't install anything.
+    if [[ -n "$DRY_RUN" ]]; then
+        echo "[dry-run] would install any missing dependencies (kind, kubectl, helm, jq, and a container runtime)." >&2
+        return 0
+    fi
 
     if command -v brew &>/dev/null; then
         echo "Installing Dependencies with Homebrew..."
@@ -702,6 +725,15 @@ function cluster_exists {
 }
 
 function init_cluster {
+    # --dry-run: preview the runtime prep + cluster create and touch nothing — no runtime
+    # setup, no Podman machine, no `kind create`. (Shows the pinned-default create command.)
+    if [[ -n "$DRY_RUN" ]]; then
+        local cn="${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}"
+        echo "[dry-run] would prepare the container runtime, then run:" >&2
+        echo "[dry-run] would run: kind create cluster --name ${cn} --config ${SCRIPT_DIR}/kind-config.yaml --image kindest/node:${KINDEST_NODE_VERSION}" >&2
+        return 0
+    fi
+
     # Choose and prepare the container runtime (Podman or Docker, both first-class).
     if ! select_runtime; then
         exit 1
@@ -734,7 +766,7 @@ function init_cluster {
                 ;;
             [Dd]*)
                 echo "Deleting existing cluster '${CLUSTER_NAME}'..."
-                kind delete cluster --name "${CLUSTER_NAME}"
+                run_cmd kind delete cluster --name "${CLUSTER_NAME}"
                 ;;
             *)
                 echo "Cancelling; leaving the existing cluster in place."
@@ -753,15 +785,15 @@ function init_cluster {
     fi
 
     if confirm "Create the cluster with the pinned Kubernetes version (kindest/node:${KINDEST_NODE_VERSION})?" y; then
-        kind create cluster --name "${CLUSTER_NAME}" --config "$kind_config" --image "kindest/node:${KINDEST_NODE_VERSION}"
+        run_cmd kind create cluster --name "${CLUSTER_NAME}" --config "$kind_config" --image "kindest/node:${KINDEST_NODE_VERSION}"
     else
         node_image=$(select_node_image)
         if [[ -n "$node_image" ]]; then
             echo "Creating cluster '${CLUSTER_NAME}' with ${node_image}..."
-            kind create cluster --name "${CLUSTER_NAME}" --config "$kind_config" --image "${node_image}"
+            run_cmd kind create cluster --name "${CLUSTER_NAME}" --config "$kind_config" --image "${node_image}"
         else
             echo "No version selected; using KinD's default node image."
-            kind create cluster --name "${CLUSTER_NAME}" --config "$kind_config"
+            run_cmd kind create cluster --name "${CLUSTER_NAME}" --config "$kind_config"
         fi
     fi
 }
@@ -935,6 +967,16 @@ EOF
     helm_args+=(--set-string "sumologic.clusterName=${CLUSTER_NAME}")
     helm_args+=("${SUMO_COMMON_SET[@]}")
 
+    # --dry-run: show the assembled command (with helm's own --dry-run appended, the
+    # validating form) and stop — no wait prompt, no install, no next-steps. The shown
+    # --values path is the temp secrets file, so no credentials are echoed. (Args are
+    # space-joined for display; copy-paste needs quoting if a values path has spaces.)
+    if [[ -n "$DRY_RUN" ]]; then
+        echo "[dry-run] would run: helm ${helm_args[*]} --dry-run" >&2
+        echo "[dry-run] collector not installed; no changes made." >&2
+        return 0
+    fi
+
     # Optionally block until the collector pods are Ready (helm --wait). Default yes;
     # decline for a fire-and-forget install and check progress with -s/--status.
     if confirm "Wait for the collector pods to become ready?" y; then
@@ -942,8 +984,8 @@ EOF
     fi
 
     # Guard the install so a failure (incl. a --wait timeout) gives an actionable hint
-    # rather than the generic ERR-trap message.
-    if ! helm "${helm_args[@]}"; then
+    # rather than the generic ERR-trap message. run_cmd echoes it first under --verbose.
+    if ! run_cmd helm "${helm_args[@]}"; then
         echo "Helm install did not complete cleanly (see the error above)." >&2
         echo "Inspect what's deployed:  $0 -s" >&2
         echo "Watch the pods:           kubectl get pods -n sumologic -w" >&2
@@ -986,7 +1028,7 @@ function reinstall {
     # error from being doubled by the bare-dispatch ERR trap.
     if helm --kube-context "$cluster_ctx" status sumologic --namespace sumologic >/dev/null 2>&1; then
         echo "Uninstalling the existing 'sumologic' release..."
-        if ! helm --kube-context "$cluster_ctx" uninstall sumologic --namespace sumologic; then
+        if ! run_cmd helm --kube-context "$cluster_ctx" uninstall sumologic --namespace sumologic; then
             echo "Error: 'helm uninstall sumologic' failed. If a resource is stuck on a finaliser," >&2
             echo "       see the finaliser-patch steps in examples/README.md, then re-run --reinstall." >&2
             exit 1
@@ -1121,7 +1163,7 @@ function uninstall {
     echo "Caution: This will delete the cluster"
     confirm_destructive "delete the cluster"
     echo "Deleting Cluster: ${CLUSTER_NAME}"
-    kind delete cluster --name "${CLUSTER_NAME}"
+    run_cmd kind delete cluster --name "${CLUSTER_NAME}"
     if [[ "$CONTAINER_RUNTIME" == "podman" && "$OS" == "darwin" ]]; then
         echo "Leaving Podman machine intact (use --purge to remove it)."
     fi
@@ -1146,7 +1188,7 @@ function purge {
 
     confirm_destructive "delete the cluster and remove the Podman machine"
     echo "Deleting Cluster: ${CLUSTER_NAME}"
-    kind delete cluster --name "${CLUSTER_NAME}"
+    run_cmd kind delete cluster --name "${CLUSTER_NAME}"
     if [[ "$has_machine" == "yes" && -n "$running_machine" ]]; then
         echo "Stopping and Removing the - ${running_machine} - Podman Machine..."
         podman machine stop "${running_machine}"
@@ -1298,8 +1340,8 @@ function new_podman {
     stop_running_machine || return 1
 
     echo "Initializing Podman machine '$NAME' with ${MEMORY}MiB RAM..."
-    podman machine init --memory "${MEMORY}" "${NAME}"
-    podman machine start "${NAME}"
+    run_cmd podman machine init --memory "${MEMORY}" "${NAME}"
+    run_cmd podman machine start "${NAME}"
 }
 
 function use_existing_podman {
@@ -1406,7 +1448,7 @@ function use_existing_podman {
             echo "Machine '$chosen_machine' is not running."
             if confirm "Start it now?" n; then
                 echo "Starting Podman machine '$chosen_machine'..."
-                podman machine start "$chosen_machine"
+                run_cmd podman machine start "$chosen_machine"
             else
                 echo "Exiting without starting machine."
                 return 1
@@ -1548,6 +1590,8 @@ function main {
             # Modifiers (not actions): order-independent, may appear before or after.
             -y | --yes | --non-interactive) ASSUME_YES="yes" ;;
             -f | --force) FORCE="yes" ;;
+            --dry-run) DRY_RUN="yes" ;;
+            -V | --verbose) VERBOSE="yes" ;;
             *) if [[ -z "$bad_flag" ]]; then bad_flag="$1"; fi ;;
         esac
         shift
@@ -1568,6 +1612,13 @@ function main {
     if [[ -n "$conflict" ]]; then
         echo "Specify exactly one action (-i/-n/-m/-r/-o/-s/-e/--forward/-p/-u/-v)." >&2
         help >&2
+        exit 1
+    fi
+
+    # --dry-run only previews the install flow. Refuse it for other actions rather than
+    # silently ignoring it — otherwise e.g. `--dry-run -u` would still delete the cluster.
+    if [[ -n "$DRY_RUN" && "$action" != "install" && "$action" != "init" && "$action" != "helm" ]]; then
+        echo "Error: --dry-run only applies to the install flow (-i/-n/-m)." >&2
         exit 1
     fi
 
