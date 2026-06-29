@@ -187,7 +187,12 @@ function confirm {
         echo "${prompt} ${hint} y (assumed)" >&2
         return 0
     fi
-    read -rp "${prompt} ${hint} " reply
+    # On EOF/closed stdin (e.g. piped input with no -y) fall back to the default with a
+    # clear note, rather than letting the unguarded read fail and abort via the ERR trap.
+    if ! read -rp "${prompt} ${hint} " reply; then
+        echo "No input (stdin closed); using default '${default}'. Pass -y to run unattended." >&2
+        reply=$default
+    fi
     reply=${reply:-$default}
     [[ "$reply" =~ ^[Yy]$ ]]
 }
@@ -200,7 +205,12 @@ function ask {
         printf '%s' "$default"
         return 0
     fi
-    read -rp "$prompt" reply
+    # On EOF/closed stdin (e.g. piped input with no -y) fall back to the default with a
+    # note on stderr, rather than letting the unguarded read fail and abort via the ERR
+    # trap (ask is captured with $(...), so the note must not go to stdout).
+    if ! read -rp "$prompt" reply; then
+        echo "No input (stdin closed); using default '${default}'. Pass -y to run unattended." >&2
+    fi
     printf '%s' "${reply:-$default}"
 }
 
