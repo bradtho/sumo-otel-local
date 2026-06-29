@@ -102,15 +102,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install bats (Linux)
+      # jq is a script dependency that the endpoints test exercises directly; install it
+      # explicitly rather than relying on it being preinstalled on the runner image.
+      - name: Install bats + jq (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y bats
+          sudo apt-get install -y bats jq
 
-      - name: Install bats (macOS)
+      - name: Install bats + jq (macOS)
         if: runner.os == 'macOS'
-        run: brew install bats-core
+        run: brew install bats-core jq
 
       - name: Run bats suite
         run: bats --print-output-on-failure tests/

@@ -370,6 +370,67 @@ run_status() {
     [[ "$output" == *"Running"* ]]
 }
 
+# --- endpoints / forward (read-only kubectl helpers) ------------------------
+
+@test "endpoints: decodes the secret's endpoint-* keys and filters the rest" {
+    local b64; b64=$(printf 'https://logs.example' | base64)
+    run bash -c 'source "$1"; b="$2"; require_cmd(){ :;}
+        kubectl(){ printf "{\"data\":{\"endpoint-logs\":\"%s\",\"version\":\"eA==\"}}" "$b"; }
+        ASSUME_YES=yes; endpoints' _ "$SCRIPT" "$b64"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"version"* ]]                              # non-endpoint key filtered out
+    [[ "$output" == *"endpoint-logs = https://logs.example"* ]] # decoded (load-bearing: asserted last)
+}
+
+@test "endpoints: errors clearly when the sumologic secret can't be read" {
+    run bash -c 'source "$1"; require_cmd(){ :;}; kubectl(){ return 1; }; ASSUME_YES=yes; endpoints' _ "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"could not read the 'sumologic' secret"* ]]
+}
+
+@test "endpoints: a non-base64 secret value fails cleanly (exit 1, no ERR trap)" {
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo ERR_TRAP" ERR; require_cmd(){ :;}
+        kubectl(){ printf "{\"data\":{\"endpoint-logs\":\"!!notbase64!!\"}}"; }
+        ASSUME_YES=yes; endpoints' _ "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [[ "$output" != *"ERR_TRAP"* ]] # exit 1 (not return 1) avoids the bare-dispatch on_error
+    [[ "$output" == *"could not decode"* ]]
+}
+
+@test "forward: errors (no port-forward) when svc/sumo-otelcol is absent" {
+    run bash -c 'source "$1"; require_cmd(){ :;}
+        kubectl(){ case "$*" in *"get svc"*) return 1;; *) echo "PF $*";; esac; }
+        ASSUME_YES=yes; forward' _ "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"sumo-otelcol not found"* ]]
+    [[ "$output" != *"port-forward"* ]] # never reached the blocking port-forward
+}
+
+@test "forward: port-forwards svc/sumo-otelcol on 4317 + 4318 when present" {
+    run bash -c 'source "$1"; require_cmd(){ :;}
+        kubectl(){ case "$*" in *"get svc"*) return 0;; *) echo "PF $*";; esac; }
+        ASSUME_YES=yes; forward' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"port-forward svc/sumo-otelcol 4317:4317 4318:4318"* ]]
+}
+
+@test "forward: a Ctrl-C stop (kubectl exit 130) is clean, not an ERR-trap failure" {
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo ERR_TRAP" ERR; require_cmd(){ :;}
+        kubectl(){ case "$*" in *"get svc"*) return 0;; *"port-forward"*) return 130;; *) :;; esac; }
+        ASSUME_YES=yes; forward' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"ERR_TRAP"* ]] # SIGINT/130 treated as a clean stop
+    [[ "$output" == *"Stopped port-forwarding"* ]]
+}
+
+@test "endpoints: reports '(no endpoint-* keys found)' when the secret has none" {
+    run bash -c 'source "$1"; require_cmd(){ :;}
+        kubectl(){ printf "{\"data\":{\"version\":\"eA==\"}}"; }
+        ASSUME_YES=yes; endpoints' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"no endpoint-* keys found"* ]]
+}
+
 # --- error handling (errtrace) ----------------------------------------------
 
 @test "on_error fires for a failure inside a function (set -Eeuo / errtrace)" {

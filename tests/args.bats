@@ -13,7 +13,8 @@ setup() {
 STUBS='install_dependencies(){ echo "DEPS_RAN"; }; init_cluster(){ echo "INIT_RAN"; }
        install_sumo(){ echo "SUMO_RAN y=$ASSUME_YES f=$FORCE"; }
        output(){ echo "OUTPUT_RAN"; }; purge(){ echo "PURGE_RAN f=$FORCE"; }
-       uninstall(){ echo "UNINSTALL_RAN f=$FORCE"; }; status(){ echo "STATUS_RAN"; }'
+       uninstall(){ echo "UNINSTALL_RAN f=$FORCE"; }; status(){ echo "STATUS_RAN"; }
+       endpoints(){ echo "ENDPOINTS_RAN"; }; forward(){ echo "FORWARD_RAN"; }'
 
 # run_main <args...> : source the script, install stubs, then run main with the args.
 run_main() {
@@ -32,6 +33,24 @@ run_main() {
     run_main -s
     [ "$status" -eq 0 ]
     [[ "$output" == *"STATUS_RAN"* ]]
+}
+
+@test "-e/--endpoints and --forward dispatch their actions" {
+    run_main -e
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"ENDPOINTS_RAN"* ]]
+    run_main --endpoints
+    [[ "$output" == *"ENDPOINTS_RAN"* ]]
+    run_main --forward
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"FORWARD_RAN"* ]]
+}
+
+@test "-e and --forward are still single actions (conflict with another action errors)" {
+    run_main -e -i
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Specify exactly one action"* ]]
+    [[ "$output" != *"ENDPOINTS_RAN"* ]]
 }
 
 @test "-n dispatches init only (no install_sumo)" {

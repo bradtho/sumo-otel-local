@@ -57,6 +57,9 @@ Options:
   -n, --init      Install dependencies without setting up the Sumo Operator.
   -m, --helm      Install Sumo Operator onto existing cluster.
   -o, --output    Output the rendered Kubernetes manifest YAML file.
+  -s, --status    Report cluster and collector health (read-only).
+  -e, --endpoints Print the Sumo collection endpoints from the 'sumologic' secret.
+      --forward   Port-forward the traces collector's OTLP receiver to localhost:4317/4318.
   -p, --purge     Uninstall the cluster (and, with Podman on macOS, the Podman machine).
   -u, --uninstall Uninstall the Cluster only.
   -v, --version   Display the version of the script.
@@ -66,7 +69,7 @@ Options:
                   Required for -u/-p under -y; never read from the environment.
 ```
 
-Exactly one **action** (`-i`/`-n`/`-m`/`-o`/`-p`/`-u`/`-v`) is run per invocation;
+Exactly one **action** (`-i`/`-n`/`-m`/`-o`/`-s`/`-e`/`--forward`/`-p`/`-u`/`-v`) is run per invocation;
 giving two different actions is rejected with a clear error, and `-h`/`--help` always
 wins. `-y`/`--yes` and `-f`/`--force` are **modifiers** and are order-independent —
 combine either with an action in any order, e.g. `./sumo-otel-local.sh -y -i` or
@@ -112,6 +115,23 @@ opposite of the teardown rule above.
 
 Every probe is non-fatal: a missing runtime, cluster, release, pod, or CLI tool is
 reported as "not found"/"not installed" rather than erroring out.
+
+## Inspecting endpoints & sending OTLP locally
+
+Two read-only convenience commands for the testing workflow (both prompt for the cluster
+name, default `sumo`, and assume the script's install conventions — namespace `sumologic`,
+context `kind-<cluster>`):
+
+- `-e`/`--endpoints` prints the Sumo collection endpoints from the in-cluster `sumologic`
+  secret, base64-decoded (one `endpoint-*` line per signal). Requires `kubectl` + `jq`.
+- `--forward` port-forwards the **traces** collector's OTLP receiver (`svc/sumo-otelcol`)
+  to `localhost:4317` (gRPC) and `localhost:4318` (HTTP) so a local app can send OTLP
+  traces to the cluster. It blocks until you press Ctrl-C. Requires `kubectl`.
+
+```bash
+./sumo-otel-local.sh -e         # list the decoded collection endpoints
+./sumo-otel-local.sh --forward  # then point an OTLP trace exporter at localhost:4317
+```
 
 ## Configuration
 

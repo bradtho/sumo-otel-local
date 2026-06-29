@@ -14,6 +14,8 @@ function help {
     echo "  -m, --helm      Install Sumo Operator onto existing cluster."
     echo "  -o, --output    Output the rendered Kubernetes manifest YAML file."
     echo "  -s, --status    Report cluster and collector health (read-only)."
+    echo "  -e, --endpoints Print the Sumo collection endpoints from the 'sumologic' secret."
+    echo "      --forward   Port-forward the traces collector's OTLP receiver to localhost:4317/4318."
     echo "  -p, --purge     Uninstall the cluster (and, with Podman on macOS, the Podman machine)."
     echo "  -u, --uninstall Uninstall the Cluster only."
     echo "  -v, --version   Display the version of the script."
@@ -1396,6 +1398,60 @@ function set_action {
     action="$1"
 }
 
+# Print the Sumo Logic collection endpoints from the in-cluster `sumologic` secret,
+# base64-decoded (the secret stores one `endpoint-*` key per signal). Read-only; requires
+# kubectl + jq and a reachable cluster. Uses the script's conventions (namespace sumologic,
+# kind-<cluster> context).
+function endpoints {
+    require_cmd kubectl jq
+    local cluster_name secret_json
+    cluster_name=$(ask "Cluster name [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
+    if ! secret_json=$(kubectl --context "kind-${cluster_name}" -n sumologic get secret sumologic -o json 2>/dev/null); then
+        echo "Error: could not read the 'sumologic' secret (cluster unreachable, or the collector isn't installed)." >&2
+        exit 1
+    fi
+    echo "Sumo Logic collection endpoints (namespace sumologic):"
+    # Stream through jq in the `if` condition (errexit-exempt) so a jq failure — e.g. a
+    # value that isn't valid base64 — is reported cleanly here, rather than firing the ERR
+    # trap inside a command-substitution subshell (where the pipeline wouldn't be exempt).
+    # jq emits the "none found" line itself when there are no endpoint-* keys.
+    if ! printf '%s' "$secret_json" | jq -r '
+        (.data // {} | to_entries | map(select(.key | startswith("endpoint-")))) as $eps
+        | if ($eps | length) == 0 then "  (no endpoint-* keys found)"
+          else $eps[] | "  \(.key) = \(.value | @base64d)" end'; then
+        echo "Error: could not decode the secret's endpoint values (a value was not valid base64?)." >&2
+        exit 1
+    fi
+}
+
+# Port-forward the TRACES collector's OTLP receiver to localhost so local apps can send
+# OTLP traces to the cluster. The script installs with fullnameOverride=sumo, so the
+# traces collector service is svc/sumo-otelcol, exposing 4317 (gRPC) + 4318 (HTTP).
+# Blocks until Ctrl-C. Requires kubectl + a reachable cluster.
+function forward {
+    require_cmd kubectl
+    local cluster_name cluster_ctx rc
+    cluster_name=$(ask "Cluster name [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
+    cluster_ctx="kind-${cluster_name}"
+    if ! kubectl --context "$cluster_ctx" -n sumologic get svc sumo-otelcol >/dev/null 2>&1; then
+        echo "Error: svc/sumo-otelcol not found in namespace sumologic (is the collector installed and the cluster reachable?)." >&2
+        exit 1
+    fi
+    echo "Forwarding the traces collector (svc/sumo-otelcol) OTLP -> localhost:4317 (gRPC) and :4318 (HTTP)." >&2
+    echo "Point an OTLP trace exporter at localhost:4317 or :4318. Press Ctrl-C to stop." >&2
+    # port-forward blocks until Ctrl-C, which delivers SIGINT and makes kubectl exit 130.
+    # Treat that (and a clean 0) as a normal stop, so it doesn't trip the ERR trap with a
+    # misleading "command failed / nothing changed" teardown message.
+    rc=0
+    kubectl --context "$cluster_ctx" -n sumologic port-forward svc/sumo-otelcol 4317:4317 4318:4318 || rc=$?
+    if [[ "$rc" -eq 0 || "$rc" -eq 130 ]]; then
+        echo "Stopped port-forwarding." >&2
+        return 0
+    fi
+    echo "Error: port-forward exited unexpectedly (exit ${rc})." >&2
+    exit 1
+}
+
 # Entry point. Enabling strict mode and the ERR trap here (rather than at the top
 # level) keeps the script sourceable by the test suite without side effects.
 function main {
@@ -1437,6 +1493,8 @@ function main {
             -m | --helm) set_action helm ;;
             -o | --output) set_action output ;;
             -s | --status) set_action status ;;
+            -e | --endpoints) set_action endpoints ;;
+            --forward) set_action forward ;;
             -p | --purge) set_action purge ;;
             -u | --uninstall) set_action uninstall ;;
             -v | --version) set_action version ;;
@@ -1461,7 +1519,7 @@ function main {
     fi
 
     if [[ -n "$conflict" ]]; then
-        echo "Specify exactly one action (-i/-n/-m/-o/-s/-p/-u/-v)." >&2
+        echo "Specify exactly one action (-i/-n/-m/-o/-s/-e/--forward/-p/-u/-v)." >&2
         help >&2
         exit 1
     fi
@@ -1479,11 +1537,13 @@ function main {
         helm) install_sumo ;;
         output) output ;;
         status) status ;;
+        endpoints) endpoints ;;
+        forward) forward ;;
         purge) purge ;;
         uninstall) uninstall ;;
         version) version ;;
         *)
-            echo "Specify exactly one action (-i/-n/-m/-o/-s/-p/-u/-v), or -h for help." >&2
+            echo "Specify exactly one action (-i/-n/-m/-o/-s/-e/--forward/-p/-u/-v), or -h for help." >&2
             help >&2
             exit 1
             ;;
