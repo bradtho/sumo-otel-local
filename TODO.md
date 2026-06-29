@@ -47,8 +47,6 @@ _All resolved — see [Done › Review backlog (resolved)](#review-backlog--2026
 
 ### LOW severity
 
-- [ ] **Podman machine memory input is not validated before passing to `podman machine init --memory`** — `sumo-otel-local.sh:741,748` _(bug, trivial)_
-  **Fix:** Validate after the prompt: `[[ "$MEMORY" =~ ^[0-9]+$ ]] || { echo "Memory must be a positive integer (MiB), got '$MEMORY'." >&2; return 1; }`. Optionally also enforce `>= MIN_MEM_MB`.
 - [ ] **Add a UI-helper: open the Sumo data-collection page / port-forward collector endpoints** — `sumo-otel-local.sh: new command; relates to examples/README.md endpoint-extraction guidance` _(feature, small)_
   **Fix:** Add small convenience subcommands, e.g. `--endpoints` to dump the decoded `sumologic` secret endpoints (reusing the README's `kubectl get secret -o json | jq` recipe — jq is already a dependency), and `--forward` to `kubectl -n sumologic port-forward svc/<otelcol-otlp-svc> 4317:4317` so users can send OTLP locally. Keep them thin wrappers gated behind `require_cmd kubectl jq` and the active kind context. Low effort, high day-to-day usefulness for the testing workflow.
 - [ ] **Distinguish reinstall/upgrade from fresh install (clarity + safety)** — `sumo-otel-local.sh:590-599 (install_sumo); help text :10,:12` _(feature, small)_
