@@ -11,6 +11,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Serialize releases without cancelling: a second push to main queues behind the
+# running release-please instead of aborting it. cancel-in-progress stays false on
+# purpose — interrupting a release mid-run could leave a half-created tag/PR/Release.
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: write

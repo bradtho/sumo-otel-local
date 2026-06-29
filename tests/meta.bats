@@ -54,3 +54,16 @@ workflow_types() {
     # Without `edited`, fixing a bad title would never re-run the check.
     grep -Eq 'types:[[:space:]]*\[[^]]*edited' "$WF"
 }
+
+@test "meta: ci.yml cancels superseded runs (concurrency, cancel-in-progress: true)" {
+    local ci="${REPO}/.github/workflows/ci.yml"
+    grep -Eq '^concurrency:' "$ci"
+    grep -Eq 'cancel-in-progress:[[:space:]]*true' "$ci"
+}
+
+@test "meta: release-please serializes but never cancels a release (cancel-in-progress: false)" {
+    # A release must not be aborted mid-tag/-publish, so it queues rather than cancels.
+    local rp="${REPO}/.github/workflows/release-please.yml"
+    grep -Eq '^concurrency:' "$rp"
+    grep -Eq 'cancel-in-progress:[[:space:]]*false' "$rp"
+}

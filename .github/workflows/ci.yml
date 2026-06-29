@@ -5,6 +5,14 @@ on:
   push:
     branches: [dev]
 
+# Cancel superseded runs so a new push / PR-sync doesn't leave the previous run (incl.
+# the ~85s KinD mock-deploy) burning a runner. Keyed on github.ref, so the push-trigger
+# (refs/heads/dev) and PR-trigger (refs/pull/N/merge) runs land in separate groups and
+# both still run — only stale commits within each group are cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
