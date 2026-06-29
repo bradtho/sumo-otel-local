@@ -85,6 +85,7 @@ setup() {
     [[ "$output" == *"fullnameOverride=sumo"* ]]
     [[ "$output" == *"sumologic.falco.enabled=false"* ]]
     [[ "$output" == *"sumologic.logs.systemd.enabled=false"* ]]
+    [[ "$output" == *"--kube-context kind-sumo"* ]] # pinned to the named KinD cluster, not the current context
 }
 
 @test "install_sumo: credentials never appear on the helm command line" {
@@ -142,18 +143,19 @@ setup() {
     [[ "$output" != *"HELM"* ]]
 }
 
-@test "reinstall: an existing release is uninstalled, then install_sumo runs" {
+@test "reinstall: an existing release is uninstalled (context-pinned), then install_sumo runs" {
+    # Match on $* (not $1) since the call is now `helm --kube-context kind-<c> uninstall ...`.
     run bash -c 'source "$1"; require_cmd(){ :;}; install_sumo(){ echo INSTALL_RAN; }
-        helm(){ case "$1" in status) return 0;; uninstall) echo "UNINST $*";; esac; }
+        helm(){ case "$*" in *"status sumologic"*) return 0;; *"uninstall sumologic"*) echo "UNINST $*";; esac; }
         ASSUME_YES=yes; reinstall' _ "$SCRIPT"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"UNINST uninstall sumologic"* ]]
+    [[ "$output" == *"UNINST --kube-context kind-sumo uninstall sumologic"* ]] # uninstall pins the context
     [[ "$output" == *"INSTALL_RAN"* ]]
 }
 
 @test "reinstall: a stuck uninstall errors with the finalizer hint and skips reinstall" {
     run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo ERR_TRAP" ERR; require_cmd(){ :;}; install_sumo(){ echo INSTALL_RAN; }
-        helm(){ case "$1" in status) return 0;; uninstall) return 1;; esac; }
+        helm(){ case "$*" in *"status sumologic"*) return 0;; *"uninstall sumologic"*) return 1;; esac; }
         ASSUME_YES=yes; reinstall' _ "$SCRIPT"
     [ "$status" -eq 1 ]
     [[ "$output" == *"finaliser"* ]]   # matches examples/README.md's "## Finalisers" (UK spelling)
@@ -163,7 +165,7 @@ setup() {
 
 @test "reinstall: no existing release proceeds straight to a fresh install" {
     run bash -c 'source "$1"; require_cmd(){ :;}; install_sumo(){ echo INSTALL_RAN; }
-        helm(){ case "$1" in status) return 1;; uninstall) echo "UNINST $*";; esac; }
+        helm(){ case "$*" in *"status sumologic"*) return 1;; *"uninstall sumologic"*) echo "UNINST $*";; esac; }
         ASSUME_YES=yes; reinstall' _ "$SCRIPT"
     [ "$status" -eq 0 ]
     [[ "$output" != *"UNINST"* ]]       # nothing to uninstall

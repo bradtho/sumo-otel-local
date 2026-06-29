@@ -892,7 +892,10 @@ function install_sumo {
     # A values file is optional, but if one is named it must exist.
     [[ -n "$HELM_VALUES" ]] && require_values_file "$HELM_VALUES"
 
-    CLUSTER_NAME=$(ask "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
+    # Reuse an already-resolved CLUSTER_NAME as the default (e.g. set by reinstall) so the
+    # uninstall and reinstall target the same cluster; falls back to DEFAULT_CLUSTER_NAME
+    # for a direct -m/-i where it isn't pre-set (unchanged behavior there).
+    CLUSTER_NAME=$(ask "Name of the cluster [default=${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}]: " "${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}")
 
     # Always ensure the repo is registered; the prompt only controls refreshing it.
     if confirm "Check for Helm repo updates?" n; then
@@ -921,8 +924,11 @@ sumologic:
 EOF
 
     # Build the helm args; only include the user values file when one is in use.
+    # Pin --kube-context to the named KinD cluster so a stray/wrong *current* kubectl
+    # context can't make this install/upgrade hit an unintended cluster.
     local helm_args=(upgrade --install sumologic sumologic/sumologic
         --version "$chart_version"
+        --kube-context "kind-${CLUSTER_NAME}"
         --namespace=sumologic --create-namespace)
     [[ -n "$HELM_VALUES" ]] && helm_args+=(--values "$HELM_VALUES")
     helm_args+=(--values "$secrets_file")
@@ -970,12 +976,17 @@ function reinstall {
         echo "Cancelled; nothing changed."
         exit 0
     fi
+    # Resolve the cluster once and pin --kube-context so the uninstall and the reinstall
+    # target the SAME cluster and neither touches a stray current context. install_sumo
+    # (called below) reuses this CLUSTER_NAME as its prompt default.
+    CLUSTER_NAME=$(ask "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
+    local cluster_ctx="kind-${CLUSTER_NAME}"
     # Only uninstall if a release is actually present, so a reinstall also works as a plain
     # install after a partial/failed deploy. `exit 1` (not return) keeps a stuck-uninstall
     # error from being doubled by the bare-dispatch ERR trap.
-    if helm status sumologic --namespace sumologic >/dev/null 2>&1; then
+    if helm --kube-context "$cluster_ctx" status sumologic --namespace sumologic >/dev/null 2>&1; then
         echo "Uninstalling the existing 'sumologic' release..."
-        if ! helm uninstall sumologic --namespace sumologic; then
+        if ! helm --kube-context "$cluster_ctx" uninstall sumologic --namespace sumologic; then
             echo "Error: 'helm uninstall sumologic' failed. If a resource is stuck on a finaliser," >&2
             echo "       see the finaliser-patch steps in examples/README.md, then re-run --reinstall." >&2
             exit 1
@@ -1047,6 +1058,8 @@ EOF
 
     # Mirror install_sumo's args so the rendered manifest matches what -i/-m deploys:
     # optional user values, then placeholder creds, clusterName, and the shared overrides.
+    # No --kube-context here (unlike install_sumo/reinstall): `helm template` renders
+    # offline and never contacts a cluster, so there is no current-context to pin against.
     local template_args=(template sumologic sumologic/sumologic
         --version "$chart_version"
         --namespace=sumologic --create-namespace)
