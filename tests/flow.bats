@@ -166,9 +166,9 @@ setup() {
         helm(){ case "$1" in status) return 1;; uninstall) echo "UNINST $*";; esac; }
         ASSUME_YES=yes; reinstall' _ "$SCRIPT"
     [ "$status" -eq 0 ]
-    [[ "$output" != *"UNINST"* ]]      # nothing to uninstall
-    [[ "$output" == *"No existing"* ]]
-    [[ "$output" == *"INSTALL_RAN"* ]]
+    [[ "$output" != *"UNINST"* ]]       # nothing to uninstall
+    [[ "$output" == *"INSTALL_RAN"* ]]  # proceeded to a fresh install
+    [[ "$output" == *"No active"* ]]    # the hedged "no release / maybe unreachable" message (asserted last)
 }
 
 # NB: helm's stdout is piped into `| tee`, so a `helm(){ echo MARKER;}` stub's output
