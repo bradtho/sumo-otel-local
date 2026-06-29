@@ -166,6 +166,45 @@ setup() {
     [ -s "$ran" ]                         # render still proceeded
 }
 
+@test "output: a missing target directory fails fast before rendering" {
+    local kfile="${BATS_TEST_TMPDIR}/nope/out.yaml" ran="${BATS_TEST_TMPDIR}/helm_ran" # parent dir absent
+    run bash -c 'source "$1"; kfile="$2"; ran="$3"
+        require_cmd(){ :;}; require_values_file(){ :;}; ensure_helm_repo(){ echo REPO_RAN;}; select_chart_version(){ printf 5.2.0;}
+        ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *) printf "";; esac; }
+        tee(){ cat >/dev/null;}; helm(){ echo ran >"$ran";}
+        ASSUME_YES=yes; output' _ "$SCRIPT" "$kfile" "$ran"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"does not exist"* ]]
+    [[ "$output" != *"REPO_RAN"* ]] # bailed before the helm repo / render work
+    [ ! -e "$ran" ]                 # helm never ran
+}
+
+@test "output: a write (tee) failure is reported clearly, not via the ERR trap" {
+    local kfile="${BATS_TEST_TMPDIR}/out.yaml" ran="${BATS_TEST_TMPDIR}/helm_ran"
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo ERR_TRAP" ERR
+        kfile="$2"; ran="$3"
+        require_cmd(){ :;}; require_values_file(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
+        ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *) printf "";; esac; }
+        tee(){ cat >/dev/null; return 1;}; helm(){ echo ran >"$ran";}
+        ASSUME_YES=yes; output' _ "$SCRIPT" "$kfile" "$ran"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"failed to write"* ]] # PIPESTATUS distinguishes the write half
+    [[ "$output" != *"ERR_TRAP"* ]]        # handled gracefully (pipeline in an `if` is errexit-exempt)
+}
+
+@test "output: a helm render failure is reported distinctly from a write failure" {
+    local kfile="${BATS_TEST_TMPDIR}/out.yaml"
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo ERR_TRAP" ERR
+        kfile="$2"
+        require_cmd(){ :;}; require_values_file(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
+        ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *) printf "";; esac; }
+        tee(){ cat >/dev/null;}; helm(){ return 1;}
+        ASSUME_YES=yes; output' _ "$SCRIPT" "$kfile"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"helm failed to render"* ]] # PIPESTATUS[0] != 0 -> render half
+    [[ "$output" != *"ERR_TRAP"* ]]
+}
+
 @test "output: mirrors install (version + clusterName + overrides) with placeholder creds off-argv" {
     # Capture helm's argv to a file (via a closure) so the assertion doesn't depend on
     # the `helm | tee` pipe's stdout, which behaves differently across platforms.

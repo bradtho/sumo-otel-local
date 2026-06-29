@@ -946,6 +946,16 @@ function output {
         exit 0
     fi
 
+    # Fail fast if the target directory is missing: rendering the whole chart only to
+    # have the write fail would otherwise surface a cryptic ERR-trap line. (dirname of a
+    # bare filename like the default is ".", which always exists.)
+    local out_dir
+    out_dir=$(dirname "$K8S_YAML")
+    [[ -d "$out_dir" ]] || {
+        echo "Error: output directory '${out_dir}' for '${K8S_YAML}' does not exist." >&2
+        exit 1
+    }
+
     # The chart is referenced as sumologic/sumologic, so the repo must be registered.
     ensure_helm_repo
 
@@ -975,7 +985,19 @@ EOF
     template_args+=(--set-string "sumologic.clusterName=${CLUSTER_NAME}")
     template_args+=("${SUMO_COMMON_SET[@]}")
 
-    helm "${template_args[@]}" | tee "${K8S_YAML}"
+    # Render to the file (tee also echoes the manifest to stdout). Under pipefail a tee
+    # write failure would abort via the ERR trap with a cryptic line, so run the pipeline
+    # in an `if` (exempt from errexit) and report which half failed using PIPESTATUS:
+    # index 0 is helm (render), index 1 is tee (write).
+    if ! helm "${template_args[@]}" | tee "${K8S_YAML}"; then
+        local pipe_status=("${PIPESTATUS[@]}")
+        if [[ "${pipe_status[0]}" -ne 0 ]]; then
+            echo "Error: helm failed to render the chart (exit ${pipe_status[0]})." >&2
+        else
+            echo "Error: failed to write the rendered manifest to '${K8S_YAML}' (tee exit ${pipe_status[1]:-1})." >&2
+        fi
+        exit 1
+    fi
     echo "Rendered sumologic/sumologic chart version ${chart_version} to ${K8S_YAML}." >&2
     echo "Note: the rendered Secret uses placeholder credentials; deploy with -i/-m to inject real ones." >&2
 }
