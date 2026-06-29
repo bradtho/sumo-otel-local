@@ -55,7 +55,8 @@ Options:
   -h, --help      Display this help message.
   -i, --install   Install the dependencies and setup the Sumo Operator.
   -n, --init      Install dependencies without setting up the Sumo Operator.
-  -m, --helm      Install Sumo Operator onto existing cluster.
+  -m, --helm      Install or upgrade the Sumo collector on an existing cluster.
+  -r, --reinstall Uninstall the Sumo collector then reinstall it (cluster stays).
   -o, --output    Output the rendered Kubernetes manifest YAML file.
   -s, --status    Report cluster and collector health (read-only).
   -e, --endpoints Print the Sumo collection endpoints from the 'sumologic' secret.
@@ -69,7 +70,7 @@ Options:
                   Required for -u/-p under -y; never read from the environment.
 ```
 
-Exactly one **action** (`-i`/`-n`/`-m`/`-o`/`-s`/`-e`/`--forward`/`-p`/`-u`/`-v`) is run per invocation;
+Exactly one **action** (`-i`/`-n`/`-m`/`-r`/`-o`/`-s`/`-e`/`--forward`/`-p`/`-u`/`-v`) is run per invocation;
 giving two different actions is rejected with a clear error, and `-h`/`--help` always
 wins. `-y`/`--yes` and `-f`/`--force` are **modifiers** and are order-independent —
 combine either with an action in any order, e.g. `./sumo-otel-local.sh -y -i` or

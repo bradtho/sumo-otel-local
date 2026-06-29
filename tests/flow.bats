@@ -120,6 +120,57 @@ setup() {
     [[ "$output" != *"Next steps"* ]]
 }
 
+# --- reinstall (uninstall the release, then install_sumo) -------------------
+
+@test "reinstall: declining the confirm aborts without uninstalling or installing" {
+    run bash -c 'source "$1"; require_cmd(){ :;}; install_sumo(){ echo INSTALL_RAN; }
+        confirm(){ return 1; }; helm(){ echo "HELM $*"; }
+        ASSUME_YES=""; reinstall </dev/null' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Cancelled"* ]]
+    [[ "$output" != *"HELM"* ]]        # no helm status/uninstall ran
+    [[ "$output" != *"INSTALL_RAN"* ]]
+}
+
+@test "reinstall: the real confirm defaults to NO on EOF (drives confirm, not a stub)" {
+    # Exercises the real `confirm "..." n`: closed stdin + no -y -> default no -> cancel.
+    # The stubbed test above can't catch a default-no -> default-yes regression.
+    run bash -c 'source "$1"; require_cmd(){ :;}; install_sumo(){ echo INSTALL_RAN; }
+        helm(){ echo "HELM $*"; }; ASSUME_YES=""; reinstall </dev/null' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"INSTALL_RAN"* ]] # default-no path: never reinstalls
+    [[ "$output" != *"HELM"* ]]
+}
+
+@test "reinstall: an existing release is uninstalled, then install_sumo runs" {
+    run bash -c 'source "$1"; require_cmd(){ :;}; install_sumo(){ echo INSTALL_RAN; }
+        helm(){ case "$1" in status) return 0;; uninstall) echo "UNINST $*";; esac; }
+        ASSUME_YES=yes; reinstall' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"UNINST uninstall sumologic"* ]]
+    [[ "$output" == *"INSTALL_RAN"* ]]
+}
+
+@test "reinstall: a stuck uninstall errors with the finalizer hint and skips reinstall" {
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo ERR_TRAP" ERR; require_cmd(){ :;}; install_sumo(){ echo INSTALL_RAN; }
+        helm(){ case "$1" in status) return 0;; uninstall) return 1;; esac; }
+        ASSUME_YES=yes; reinstall' _ "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"finaliser"* ]]   # matches examples/README.md's "## Finalisers" (UK spelling)
+    [[ "$output" != *"ERR_TRAP"* ]]    # exit 1 (not return 1) -> no bare-dispatch on_error
+    [[ "$output" != *"INSTALL_RAN"* ]] # reinstall skipped after the failed uninstall
+}
+
+@test "reinstall: no existing release proceeds straight to a fresh install" {
+    run bash -c 'source "$1"; require_cmd(){ :;}; install_sumo(){ echo INSTALL_RAN; }
+        helm(){ case "$1" in status) return 1;; uninstall) echo "UNINST $*";; esac; }
+        ASSUME_YES=yes; reinstall' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"UNINST"* ]]      # nothing to uninstall
+    [[ "$output" == *"No existing"* ]]
+    [[ "$output" == *"INSTALL_RAN"* ]]
+}
+
 # NB: helm's stdout is piped into `| tee`, so a `helm(){ echo MARKER;}` stub's output
 # never reaches $output. Signal "helm ran" by writing a marker FILE via redirection
 # (survives the pipe), mirroring the arg-capture test below. (Asserting on $output here

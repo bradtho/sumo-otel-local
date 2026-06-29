@@ -11,7 +11,8 @@ function help {
     echo "  -h, --help      Display this help message."
     echo "  -i, --install   Install the dependencies and setup the Sumo Operator."
     echo "  -n, --init      Install dependencies without setting up the Sumo Operator."
-    echo "  -m, --helm      Install Sumo Operator onto existing cluster."
+    echo "  -m, --helm      Install or upgrade the Sumo collector on an existing cluster."
+    echo "  -r, --reinstall Uninstall the Sumo collector then reinstall it (cluster stays)."
     echo "  -o, --output    Output the rendered Kubernetes manifest YAML file."
     echo "  -s, --status    Report cluster and collector health (read-only)."
     echo "  -e, --endpoints Print the Sumo collection endpoints from the 'sumologic' secret."
@@ -955,6 +956,38 @@ Next steps:
 EOF
 }
 
+# Reinstall the collector: uninstall the existing `sumologic` Helm release, then run the
+# normal install (`helm upgrade --install`). For when an in-place upgrade (-m) is wedged.
+# The KinD cluster and Podman machine are left intact (use -u/-p to remove those).
+function reinstall {
+    require_cmd helm
+    echo "Reinstall removes the 'sumologic' Helm release and installs it fresh."
+    echo "The KinD cluster and Podman machine stay intact (use -u/-p to remove those)."
+    # Plain confirm() (honors -y) is intentional here, NOT confirm_destructive: a reinstall
+    # is recoverable (install_sumo runs immediately after, and the cluster/machine/stored
+    # credentials are untouched), unlike the irreversible wipes confirm_destructive guards.
+    if ! confirm "Uninstall and reinstall the sumologic collector?" n; then
+        echo "Cancelled; nothing changed."
+        exit 0
+    fi
+    # Only uninstall if a release is actually present, so a reinstall also works as a plain
+    # install after a partial/failed deploy. `exit 1` (not return) keeps a stuck-uninstall
+    # error from being doubled by the bare-dispatch ERR trap.
+    if helm status sumologic --namespace sumologic >/dev/null 2>&1; then
+        echo "Uninstalling the existing 'sumologic' release..."
+        if ! helm uninstall sumologic --namespace sumologic; then
+            echo "Error: 'helm uninstall sumologic' failed. If a resource is stuck on a finaliser," >&2
+            echo "       see the finaliser-patch steps in examples/README.md, then re-run --reinstall." >&2
+            exit 1
+        fi
+    else
+        # helm status also exits non-zero when the cluster is unreachable, so hedge rather
+        # than assert "no release" — install_sumo surfaces a clear error if it can't connect.
+        echo "No active 'sumologic' release found (or the cluster is unreachable); proceeding to install."
+    fi
+    install_sumo
+}
+
 function output {
     require_cmd helm
     DEFAULT_HELM_VALUES="$SCRIPT_DIR/values.yaml"
@@ -1491,6 +1524,7 @@ function main {
             -i | --install) set_action install ;;
             -n | --init) set_action init ;;
             -m | --helm) set_action helm ;;
+            -r | --reinstall) set_action reinstall ;;
             -o | --output) set_action output ;;
             -s | --status) set_action status ;;
             -e | --endpoints) set_action endpoints ;;
@@ -1519,7 +1553,7 @@ function main {
     fi
 
     if [[ -n "$conflict" ]]; then
-        echo "Specify exactly one action (-i/-n/-m/-o/-s/-e/--forward/-p/-u/-v)." >&2
+        echo "Specify exactly one action (-i/-n/-m/-r/-o/-s/-e/--forward/-p/-u/-v)." >&2
         help >&2
         exit 1
     fi
@@ -1535,6 +1569,7 @@ function main {
             init_cluster
             ;;
         helm) install_sumo ;;
+        reinstall) reinstall ;;
         output) output ;;
         status) status ;;
         endpoints) endpoints ;;
@@ -1543,7 +1578,7 @@ function main {
         uninstall) uninstall ;;
         version) version ;;
         *)
-            echo "Specify exactly one action (-i/-n/-m/-o/-s/-e/--forward/-p/-u/-v), or -h for help." >&2
+            echo "Specify exactly one action (-i/-n/-m/-r/-o/-s/-e/--forward/-p/-u/-v), or -h for help." >&2
             help >&2
             exit 1
             ;;

@@ -14,7 +14,8 @@ STUBS='install_dependencies(){ echo "DEPS_RAN"; }; init_cluster(){ echo "INIT_RA
        install_sumo(){ echo "SUMO_RAN y=$ASSUME_YES f=$FORCE"; }
        output(){ echo "OUTPUT_RAN"; }; purge(){ echo "PURGE_RAN f=$FORCE"; }
        uninstall(){ echo "UNINSTALL_RAN f=$FORCE"; }; status(){ echo "STATUS_RAN"; }
-       endpoints(){ echo "ENDPOINTS_RAN"; }; forward(){ echo "FORWARD_RAN"; }'
+       endpoints(){ echo "ENDPOINTS_RAN"; }; forward(){ echo "FORWARD_RAN"; }
+       reinstall(){ echo "REINSTALL_RAN"; }'
 
 # run_main <args...> : source the script, install stubs, then run main with the args.
 run_main() {
@@ -33,6 +34,15 @@ run_main() {
     run_main -s
     [ "$status" -eq 0 ]
     [[ "$output" == *"STATUS_RAN"* ]]
+}
+
+@test "-r/--reinstall dispatches the reinstall action" {
+    run_main -r
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"REINSTALL_RAN"* ]]
+    run_main --reinstall
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"REINSTALL_RAN"* ]]
 }
 
 @test "-e/--endpoints and --forward dispatch their actions" {
