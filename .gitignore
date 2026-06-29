@@ -1,8 +1,12 @@
 .DS_Store
 *.tar*
 
-# Rendered manifest from `-o`/--output (default file name; `tee`d into the cwd).
+# Rendered manifest from `-o`/--output (default file name).
 sumologic-rendered.yaml
+
+# Atomic-write temp `-o` renders into (same dir as the target, mv'd into place on
+# success); only lingers if a render in the repo root crashes mid-write.
+.sumo-render.*
 
 # Leftover only if the Homebrew bootstrap fails before install_dependencies'
 # own `rm` runs (the ERR trap would exit first).

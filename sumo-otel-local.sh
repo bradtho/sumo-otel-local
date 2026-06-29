@@ -936,6 +936,21 @@ function output {
     CLUSTER_NAME=$(ask "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
     K8S_YAML=$(ask "Name and Location of the rendered Kubernetes Manifest YAML file. [default=sumologic-rendered.yaml]: " "$DEFAULT_K8S_YAML")
 
+    # Validate the target path up front, before any prompt or helm work: reject a missing
+    # parent directory, or a path that is itself an existing directory (the atomic mv
+    # below would otherwise move the render *into* it). dirname of a bare filename like
+    # the default is ".", which always exists.
+    local out_dir
+    out_dir=$(dirname "$K8S_YAML")
+    [[ -d "$out_dir" ]] || {
+        echo "Error: output directory '${out_dir}' for '${K8S_YAML}' does not exist." >&2
+        exit 1
+    }
+    if [[ -d "$K8S_YAML" ]]; then
+        echo "Error: '${K8S_YAML}' is an existing directory, not a file." >&2
+        exit 1
+    fi
+
     # Don't silently clobber an existing render. confirm() honours -y/ASSUME_YES
     # (auto-overwrite) — acceptable here because the output file is a regenerable
     # artifact, not irreversible state like a cluster teardown (which routes through
@@ -945,16 +960,6 @@ function output {
         echo "Aborted; '${K8S_YAML}' left unchanged." >&2
         exit 0
     fi
-
-    # Fail fast if the target directory is missing: rendering the whole chart only to
-    # have the write fail would otherwise surface a cryptic ERR-trap line. (dirname of a
-    # bare filename like the default is ".", which always exists.)
-    local out_dir
-    out_dir=$(dirname "$K8S_YAML")
-    [[ -d "$out_dir" ]] || {
-        echo "Error: output directory '${out_dir}' for '${K8S_YAML}' does not exist." >&2
-        exit 1
-    }
 
     # The chart is referenced as sumologic/sumologic, so the repo must be registered.
     ensure_helm_repo
@@ -985,17 +990,44 @@ EOF
     template_args+=(--set-string "sumologic.clusterName=${CLUSTER_NAME}")
     template_args+=("${SUMO_COMMON_SET[@]}")
 
-    # Render to the file (tee also echoes the manifest to stdout). Under pipefail a tee
-    # write failure would abort via the ERR trap with a cryptic line, so run the pipeline
-    # in an `if` (exempt from errexit) and report which half failed using PIPESTATUS:
-    # index 0 is helm (render), index 1 is tee (write).
-    if ! helm "${template_args[@]}" | tee "${K8S_YAML}"; then
-        local pipe_status=("${PIPESTATUS[@]}")
-        if [[ "${pipe_status[0]}" -ne 0 ]]; then
-            echo "Error: helm failed to render the chart (exit ${pipe_status[0]})." >&2
-        else
-            echo "Error: failed to write the rendered manifest to '${K8S_YAML}' (tee exit ${pipe_status[1]:-1})." >&2
-        fi
+    # Render atomically: write to a temp file in the SAME directory as the target (so the
+    # final mv is an atomic rename that never crosses a filesystem), then mv into place
+    # only on a fully-successful render. A failed render therefore never leaves a partial
+    # file nor clobbers a pre-existing good render. tee still echoes the manifest to stdout.
+    # render_tmp is intentionally NOT local: the EXIT trap runs in the global scope, where
+    # function-locals are invisible (an empty "$render_tmp" would skip the cleanup and leak
+    # the temp on failure). secrets_file is global for the same reason.
+    # The mktemp runs in an `if` (errexit-exempt) so a failure reports its own clear line
+    # rather than the generic ERR-trap message.
+    if ! render_tmp=$(mktemp "${out_dir}/.sumo-render.XXXXXX"); then
+        echo "Error: cannot create a temporary file in '${out_dir}' to render into." >&2
+        exit 1
+    fi
+    trap 'rm -f "$secrets_file" "$render_tmp"' EXIT
+    # mktemp creates the temp 0600; the rendered manifest is non-secret (placeholder
+    # creds), so restore the umask-derived perms the old `tee` redirect produced.
+    chmod "$(printf '%04o' "$((0666 & ~0$(umask)))")" "$render_tmp"
+
+    # Run the pipeline errexit-exempt and capture BOTH stage statuses (identical in either
+    # branch — `:`/another command would reset PIPESTATUS). Checking PIPESTATUS[0] (helm)
+    # explicitly, not the pipeline's aggregate status, catches a helm-render failure even
+    # though tee still exits 0 — i.e. independent of whether pipefail is set. tee echoes to
+    # stdout. index 0 is helm (render), index 1 is tee (write).
+    local pipe_status
+    if helm "${template_args[@]}" | tee "${render_tmp}"; then
+        pipe_status=("${PIPESTATUS[@]}")
+    else
+        pipe_status=("${PIPESTATUS[@]}")
+    fi
+    if [[ "${pipe_status[0]}" -ne 0 ]]; then
+        echo "Error: helm failed to render the chart (exit ${pipe_status[0]}); '${K8S_YAML}' left unchanged." >&2
+        exit 1
+    elif [[ "${pipe_status[1]:-0}" -ne 0 ]]; then
+        echo "Error: failed to write the rendered manifest (tee exit ${pipe_status[1]}); '${K8S_YAML}' left unchanged." >&2
+        exit 1
+    fi
+    if ! mv "$render_tmp" "$K8S_YAML"; then
+        echo "Error: rendered the chart but could not move it into place at '${K8S_YAML}'; '${K8S_YAML}' left unchanged." >&2
         exit 1
     fi
     echo "Rendered sumologic/sumologic chart version ${chart_version} to ${K8S_YAML}." >&2

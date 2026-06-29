@@ -190,6 +190,7 @@ setup() {
     [ "$status" -eq 1 ]
     [[ "$output" == *"failed to write"* ]] # PIPESTATUS distinguishes the write half
     [[ "$output" != *"ERR_TRAP"* ]]        # handled gracefully (pipeline in an `if` is errexit-exempt)
+    [ ! -e "$kfile" ]                      # target never created (render goes to a temp; mv skipped on failure)
 }
 
 @test "output: a helm render failure is reported distinctly from a write failure" {
@@ -203,14 +204,120 @@ setup() {
     [ "$status" -eq 1 ]
     [[ "$output" == *"helm failed to render"* ]] # PIPESTATUS[0] != 0 -> render half
     [[ "$output" != *"ERR_TRAP"* ]]
+    [ ! -e "$kfile" ]                            # target never created
+}
+
+@test "output: a failed render leaves an existing file untouched (atomic write)" {
+    local kfile="${BATS_TEST_TMPDIR}/out.yaml"
+    printf 'OLD CONTENT\n' >"$kfile" # a prior good render
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo ERR_TRAP" ERR; kfile="$2"
+        require_cmd(){ :;}; require_values_file(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
+        ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *) printf "";; esac; }
+        confirm(){ return 0;}                      # accept overwriting the existing file
+        tee(){ cat >/dev/null;}; helm(){ echo PARTIAL; return 1;}
+        ASSUME_YES=""; output </dev/null' _ "$SCRIPT" "$kfile"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"left unchanged"* ]]
+    run cat "$kfile"
+    [ "$output" = "OLD CONTENT" ] # render failed -> prior content preserved (mv never ran)
+    # The temp must be cleaned on the failure path too (EXIT trap); regression guard for a
+    # `local render_tmp` that the global-scope EXIT trap couldn't see and so leaked.
+    run bash -c 'ls "$1"/.sumo-render.* 2>/dev/null | wc -l | tr -d " "' _ "$BATS_TEST_TMPDIR"
+    [ "$output" = "0" ]
+}
+
+@test "output: a successful render is moved into place atomically, no leftover temp" {
+    local kfile="${BATS_TEST_TMPDIR}/out.yaml"
+    run bash -c 'source "$1"; kfile="$2"
+        require_cmd(){ :;}; require_values_file(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
+        ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *) printf "";; esac; }
+        tee(){ cat >"$1";}; helm(){ echo RENDERED_MANIFEST;}
+        ASSUME_YES=yes; output' _ "$SCRIPT" "$kfile"
+    [ "$status" -eq 0 ]
+    run cat "$kfile"
+    [ "$output" = "RENDERED_MANIFEST" ] # temp content mv'd into the target
+    run bash -c 'ls "$1"/.sumo-render.* 2>/dev/null | wc -l | tr -d " "' _ "$BATS_TEST_TMPDIR"
+    [ "$output" = "0" ]                 # same-dir temp was moved, none left behind
+}
+
+@test "output: rejects a target that is an existing directory" {
+    local adir="${BATS_TEST_TMPDIR}/adir"
+    mkdir -p "$adir"
+    run bash -c 'source "$1"; adir="$2"
+        require_cmd(){ :;}; require_values_file(){ :;}; ensure_helm_repo(){ echo REPO_RAN;}; select_chart_version(){ printf 5.2.0;}
+        ask(){ case "$1" in *Manifest*) printf "%s" "$adir";; *) printf "";; esac; }
+        tee(){ cat >/dev/null;}; helm(){ echo X;}
+        ASSUME_YES=yes; output' _ "$SCRIPT" "$adir"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"is an existing directory"* ]]
+    [[ "$output" != *"REPO_RAN"* ]] # rejected before any helm work (the atomic mv would move INTO it)
+}
+
+@test "output: a successful render atomically replaces a pre-existing file's contents" {
+    local kfile="${BATS_TEST_TMPDIR}/out.yaml"
+    printf 'STALE\n' >"$kfile"
+    run bash -c 'source "$1"; kfile="$2"
+        require_cmd(){ :;}; require_values_file(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
+        ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *) printf "";; esac; }
+        confirm(){ return 0;}; tee(){ cat >"$1";}; helm(){ echo FRESH_RENDER;}
+        ASSUME_YES=""; output </dev/null' _ "$SCRIPT" "$kfile"
+    [ "$status" -eq 0 ]
+    run cat "$kfile"
+    [ "$output" = "FRESH_RENDER" ] # stale content fully replaced by the mv
+}
+
+@test "output: a failed mv reports clearly, leaves the prior file and no temp" {
+    local kfile="${BATS_TEST_TMPDIR}/out.yaml"
+    printf 'PRIOR\n' >"$kfile"
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo ERR_TRAP" ERR; kfile="$2"
+        require_cmd(){ :;}; require_values_file(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
+        ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *) printf "";; esac; }
+        confirm(){ return 0;}; mv(){ return 1;}; tee(){ cat >"$1";}; helm(){ echo NEW;}
+        ASSUME_YES=""; output </dev/null' _ "$SCRIPT" "$kfile"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"left unchanged"* ]]
+    [[ "$output" != *"ERR_TRAP"* ]]
+    run cat "$kfile"
+    [ "$output" = "PRIOR" ] # mv failed -> prior content intact
+    run bash -c 'ls "$1"/.sumo-render.* 2>/dev/null | wc -l | tr -d " "' _ "$BATS_TEST_TMPDIR"
+    [ "$output" = "0" ] # temp cleaned even on the mv-failure path
+}
+
+@test "output: a helm failure is caught even with pipefail off (PIPESTATUS[0], not tee's status)" {
+    local kfile="${BATS_TEST_TMPDIR}/out.yaml"
+    run bash -c 'source "$1"; set -Eeuo pipefail; set +o pipefail; trap "echo ERR_TRAP" ERR; kfile="$2"
+        require_cmd(){ :;}; require_values_file(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
+        ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *) printf "";; esac; }
+        tee(){ cat >/dev/null;}; helm(){ echo GARBAGE; return 1;}
+        ASSUME_YES=yes; output' _ "$SCRIPT" "$kfile"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"helm failed to render"* ]]
+    [ ! -e "$kfile" ] # garbage tee output never promoted to the target
+}
+
+@test "output: a temp-file creation failure reports clearly, not via the ERR trap" {
+    local kfile="${BATS_TEST_TMPDIR}/out.yaml"
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo ERR_TRAP" ERR; kfile="$2"
+        require_cmd(){ :;}; require_values_file(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
+        ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *) printf "";; esac; }
+        mktemp(){ case "$*" in *sumo-render*) return 1;; *) command mktemp "$@";; esac; }
+        tee(){ cat >/dev/null;}; helm(){ echo X;}
+        ASSUME_YES=yes; output' _ "$SCRIPT" "$kfile"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"cannot create a temporary file"* ]]
+    [[ "$output" != *"ERR_TRAP"* ]]
 }
 
 @test "output: mirrors install (version + clusterName + overrides) with placeholder creds off-argv" {
     # Capture helm's argv to a file (via a closure) so the assertion doesn't depend on
-    # the `helm | tee` pipe's stdout, which behaves differently across platforms.
-    local cap="${BATS_TEST_TMPDIR}/helm_args"
-    run bash -c 'source "$1"; cap="$2"; require_cmd(){ :;}; ensure_helm_repo(){ :;}; tee(){ cat >/dev/null;}
-        helm(){ printf "%s\n" "$*" >"$cap"; }; ASSUME_YES=yes; output' _ "$SCRIPT" "$cap"
+    # the `helm | tee` pipe's stdout, which behaves differently across platforms. K8S_YAML
+    # points into the test tmpdir so the atomic mv stays hermetic (no file in the cwd).
+    local cap="${BATS_TEST_TMPDIR}/helm_args" kfile="${BATS_TEST_TMPDIR}/out.yaml"
+    run bash -c 'source "$1"; cap="$2"; kfile="$3"
+        require_cmd(){ :;}; require_values_file(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
+        ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *cluster*) printf sumo;; *) printf "";; esac; }
+        tee(){ cat >/dev/null;}
+        helm(){ printf "%s\n" "$*" >"$cap"; }; ASSUME_YES=yes; output' _ "$SCRIPT" "$cap" "$kfile"
     [ "$status" -eq 0 ]
     run cat "$cap"
     [[ "$output" == *"template sumologic sumologic/sumologic"* ]]
