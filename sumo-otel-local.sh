@@ -204,6 +204,28 @@ function ask {
     printf '%s' "${reply:-$default}"
 }
 
+# Prompt silently for a secret, re-prompting until a non-empty value is entered, and
+# echo it to stdout (for $(...) capture). Prompt and warnings go to stderr (so they
+# don't pollute the captured value), per the stderr-for-UI/stdout-for-result convention.
+# Aborts (return 1) on EOF/closed stdin rather than looping forever — callers reach this
+# only on the interactive path (the unattended path errors before prompting).
+function read_secret {
+    local prompt=$1 value
+    while true; do
+        if ! read -rsp "$prompt" value; then
+            echo "" >&2
+            echo "No input (stdin closed); aborting." >&2
+            return 1
+        fi
+        echo "" >&2
+        if [[ -n "$value" ]]; then
+            printf '%s' "$value"
+            return 0
+        fi
+        echo "Value cannot be empty; please try again." >&2
+    done
+}
+
 # Gate a destructive teardown (cluster / Podman machine / stored credentials). Sets
 # CLUSTER_NAME to the cluster to remove and returns 0 to proceed. On an interactive
 # "no" or a typed [exit] it prints a cancel message and exits 0.
@@ -832,8 +854,7 @@ function install_sumo {
             exit 1
         fi
         echo "Sumo Logic Access ID not found in secret storage"
-        read -rsp "Enter Sumo Logic Access ID: " ACCESS_ID
-        echo ""
+        ACCESS_ID=$(read_secret "Enter Sumo Logic Access ID: ") || exit 1
         secret_set sumologic_access_id "$ACCESS_ID"
     fi
 
@@ -843,8 +864,7 @@ function install_sumo {
             exit 1
         fi
         echo "Sumo Logic Access Key not found in secret storage"
-        read -rsp "Enter Sumo Logic Access Key: " ACCESS_KEY
-        echo ""
+        ACCESS_KEY=$(read_secret "Enter Sumo Logic Access Key: ") || exit 1
         secret_set sumologic_access_key "$ACCESS_KEY"
     fi
 

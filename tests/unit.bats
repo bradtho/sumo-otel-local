@@ -75,6 +75,25 @@ setup() {
     [ "$output" = "sumo" ]
 }
 
+@test "read_secret: stdout is exactly the entered value (no prompt/warning leakage)" {
+    # Two empty lines then the value; stderr discarded so $output is the captured stdout.
+    run bash -c 'source "$1"; printf "\n\nhunter2\n" | read_secret "PW: " 2>/dev/null' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ "$output" = "hunter2" ]
+}
+
+@test "read_secret: re-prompts on empty input (warning goes to stderr)" {
+    # stdout discarded so $output is stderr: the empty-value warning must appear there.
+    run bash -c 'source "$1"; printf "\nhunter2\n" | read_secret "PW: " 1>/dev/null' _ "$SCRIPT"
+    [[ "$output" == *"cannot be empty"* ]]
+}
+
+@test "read_secret: aborts on EOF/closed stdin instead of looping forever" {
+    run bash -c 'source "$1"; read_secret "PW: " </dev/null' _ "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"stdin closed"* ]]
+}
+
 # --- MIN_* validation (top-level guard) -------------------------------------
 
 @test "MIN_MEM_MB validation: non-integer aborts sourcing" {

@@ -47,8 +47,6 @@ _All resolved — see [Done › Review backlog (resolved)](#review-backlog--2026
 
 ### LOW severity
 
-- [ ] **Empty credential input is accepted silently and stored** — `sumo-otel-local.sh:540-542,551-553` _(bug, trivial)_
-  **Fix:** Loop until a non-empty value is entered, e.g. `until [[ -n "$ACCESS_ID" ]]; do read -rsp "Enter Sumo Logic Access ID: " ACCESS_ID; echo; [[ -z "$ACCESS_ID" ]] && echo 'Access ID cannot be empty.' >&2; done` before calling secret_set. Apply to both ID and key.
 - [ ] **Podman machine memory input is not validated before passing to `podman machine init --memory`** — `sumo-otel-local.sh:741,748` _(bug, trivial)_
   **Fix:** Validate after the prompt: `[[ "$MEMORY" =~ ^[0-9]+$ ]] || { echo "Memory must be a positive integer (MiB), got '$MEMORY'." >&2; return 1; }`. Optionally also enforce `>= MIN_MEM_MB`.
 - [ ] **select_node_image silently aborts the whole script on non-numeric stdin EOF / piped input in interactive mode** — `sumo-otel-local.sh:263-282 (select_node_image read loop, invoked via command substitution at :437)` _(bug, small)_
@@ -216,6 +214,9 @@ corrected during implementation).
 
 #### LOW severity (complete)
 
+- [x] **Empty credential input is accepted silently and stored** — `sumo-otel-local.sh:540-542,551-553` _(bug, trivial)_
+  **Fix:** Loop until a non-empty value is entered, e.g. `until [[ -n "$ACCESS_ID" ]]; do read -rsp "Enter Sumo Logic Access ID: " ACCESS_ID; echo; [[ -z "$ACCESS_ID" ]] && echo 'Access ID cannot be empty.' >&2; done` before calling secret_set. Apply to both ID and key.
+  **Done (2026-06-29):** Added a `read_secret` helper (next to `confirm`/`ask`) that prompts silently, **re-prompts until non-empty**, and echoes only the value to stdout (prompt/warnings to stderr, per the stderr-for-UI/stdout-for-result convention). Both the Access ID and Access Key prompts now route through it (`ACCESS_ID=$(read_secret "…") || exit 1`). **Improved on the literal fix:** the naive `until [[ -n ]]; do read; done` loops **forever on EOF/closed stdin** (piped/no-TTY) — `read_secret` instead aborts with a clear message on EOF (`if ! read …; then … return 1`), matching the EOF-guard pattern used elsewhere. Credential **value-flow is unchanged** (still `read → var → secret_set`), so no new exposure — only validation was added; the unattended path still errors before prompting. Verified empirically: stdout is exactly the value (no prompt/warning leakage), empty re-prompts, EOF aborts without hanging. 3 `tests/unit.bats` cases. 99 bats green; shellcheck/shfmt clean.
 - [x] **secret_set keychain path can fail on a pre-existing/stale entry (no -U flag)** — `sumo-otel-local.sh:507` _(bug, trivial)_
   **Fix:** Add `-U` so the call updates in place: `security add-generic-password -U -a "$USER" -s "$name" -w "$value"`. This makes storing idempotent regardless of an existing entry.
   **Done (2026-06-26):** Resolved with the `secret_set` keychain rework above — `-U` now makes the store idempotent regardless of an existing/stale entry.
