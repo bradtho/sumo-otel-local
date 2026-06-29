@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.4.3...sumo-otel-local-v0.5.0) (2026-06-29)
+
+
+### Features
+
+* **cli:** add --endpoints and --forward convenience commands ([#17](https://github.com/bradtho/sumo-otel-local/issues/17)) ([88af20f](https://github.com/bradtho/sumo-otel-local/commit/88af20f385529ba9fd52894f3479fc9ea77f6d92))
+
 ## [0.4.3](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.4.2...sumo-otel-local-v0.4.3) (2026-06-29)
 
 
