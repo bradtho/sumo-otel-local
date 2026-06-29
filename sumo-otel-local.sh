@@ -1223,6 +1223,17 @@ function new_podman {
     DEFAULT_NAME="sumo"
     DEFAULT_MEMORY="${MIN_MEM_MB}" # default a new machine to the configured minimum
     MEMORY=$(ask "Allocate memory for Podman machine (in MiB) [default=${DEFAULT_MEMORY}]: " "$DEFAULT_MEMORY")
+    # Validate before handing it to `podman machine init --memory`, which otherwise fails
+    # cryptically on non-numeric input. Reject non-integers hard; warn (don't block) when
+    # below the minimum, matching check_docker_resources' tone for a deliberate choice.
+    if ! [[ "$MEMORY" =~ ^[0-9]+$ ]]; then
+        echo "Error: memory must be a positive integer (MiB), got '${MEMORY}'." >&2
+        return 1
+    fi
+    MEMORY=$((10#$MEMORY)) # normalize: strip leading zeros so the comparison isn't read as octal
+    if [[ "$MEMORY" -lt "$MIN_MEM_MB" ]]; then
+        echo "⚠️  ${MEMORY}MiB is below the recommended minimum (${MIN_MEM_MB}MiB); the Sumo stack may be unstable." >&2
+    fi
     NAME=$(ask "Name of the Podman machine [default=${DEFAULT_NAME}]: " "$DEFAULT_NAME")
 
     # Free the single run slot before creating/starting the new machine.

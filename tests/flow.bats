@@ -402,6 +402,41 @@ run_status() {
     [ "$output" = "podman" ]
 }
 
+# --- new_podman memory validation -------------------------------------------
+# new_podman is called as `new_podman || return 1`, so its return 1 is errexit-exempt
+# in the real flow; the tests call it bare (no ERR trap) and assert on $status.
+
+@test "new_podman: rejects non-integer memory before stopping/creating a machine" {
+    run bash -c 'source "$1"
+        ask(){ case "$1" in *Allocate*) printf "lots";; *) printf "sumo";; esac; }
+        stop_running_machine(){ echo STOP_RAN; }; podman(){ echo "PODMAN $*"; }
+        new_podman' _ "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"must be a positive integer"* ]]
+    [[ "$output" != *"STOP_RAN"* ]] # bailed before stopping the running machine
+    [[ "$output" != *"PODMAN"* ]]   # ...and before `podman machine init`
+}
+
+@test "new_podman: warns when memory is below the minimum but still proceeds" {
+    run bash -c 'source "$1"
+        ask(){ case "$1" in *Allocate*) printf "100";; *) printf "sumo";; esac; }
+        stop_running_machine(){ return 0; }; podman(){ echo "PODMAN $*"; }
+        new_podman' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"below the recommended minimum"* ]]
+    [[ "$output" == *"PODMAN machine init --memory 100"* ]] # proceeded with the value
+}
+
+@test "new_podman: a valid memory >= minimum passes through with no warning" {
+    run bash -c 'source "$1"
+        ask(){ case "$1" in *Allocate*) printf "20000";; *) printf "sumo";; esac; }
+        stop_running_machine(){ return 0; }; podman(){ echo "PODMAN $*"; }
+        new_podman' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"below the recommended"* ]]
+    [[ "$output" == *"PODMAN machine init --memory 20000"* ]]
+}
+
 # --- select_chart_version ---------------------------------------------------
 
 # helm stub emitting a `helm search repo --versions` style table (with an unrelated
