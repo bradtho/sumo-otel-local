@@ -161,7 +161,19 @@ VERSION="0.4.3" # x-release-please-version
 # Default KinD cluster name, used by create and teardown. Honors a CLUSTER_NAME set in
 # the environment / config file, so every name prompt (which defaults to this) and the
 # teardown/status flows pick it up.
+#
+# CLUSTER_NAME (the runtime value, not this default) is intentionally a SHARED global, not
+# a per-function local: confirm_destructive sets it for uninstall/purge to read, and
+# init_cluster/reinstall set it for install_sumo to reuse so the install targets the same
+# cluster (see install_sumo's `${CLUSTER_NAME:-...}` prompt default). HELM_VALUES is
+# likewise a config/env knob read by install_sumo and output. Don't localise either.
 DEFAULT_CLUSTER_NAME="${CLUSTER_NAME:-sumo}"
+
+# Bundled default Helm values file and the default -o/--output render path. Constants
+# (hoisted from install_sumo/output, where they were duplicated string literals); both
+# flows reference them read-only.
+DEFAULT_HELM_VALUES="$SCRIPT_DIR/values.yaml"
+DEFAULT_K8S_YAML="sumologic-rendered.yaml"
 
 # Chart overrides applied to EVERY install and render, so `-o`/--output mirrors what
 # `-i`/`-m` deploys. Single source of truth: both install_sumo and output append this,
@@ -754,6 +766,7 @@ function stop_running_machine {
 }
 
 function new_podman {
+    local DEFAULT_NAME DEFAULT_MEMORY MEMORY NAME # all new_podman-local
     echo "Creating a new Podman machine..."
     DEFAULT_NAME="sumo"
     DEFAULT_MEMORY="${MIN_MEM_MB}" # default a new machine to the configured minimum
@@ -911,6 +924,8 @@ function init_cluster {
         echo "[dry-run] would run: kind create cluster --name ${cn} --config ${SCRIPT_DIR}/kind-config.yaml --image kindest/node:${KINDEST_NODE_VERSION}" >&2
         return 0
     fi
+
+    local choice node_image # function-local working vars (the reuse choice and node-image tag)
 
     # Choose and prepare the container runtime (Podman or Docker, both first-class).
     if ! select_runtime; then
@@ -1091,7 +1106,6 @@ function install_sumo {
         secret_set sumologic_access_key "$ACCESS_KEY"
     fi
 
-    DEFAULT_HELM_VALUES="$SCRIPT_DIR/values.yaml"
     echo "A Helm values file is optional; the chart can install with --set values alone."
     echo "Example values live in the examples folder, e.g. examples/metrics_interval.yaml"
     HELM_VALUES=$(ask "Path to a Helm values file (blank to skip) [default if present=${DEFAULT_HELM_VALUES}]: " "${HELM_VALUES:-}")
@@ -1221,8 +1235,7 @@ function reinstall {
 
 function output {
     require_cmd helm
-    DEFAULT_HELM_VALUES="$SCRIPT_DIR/values.yaml"
-    DEFAULT_K8S_YAML="sumologic-rendered.yaml"
+    local K8S_YAML # CLUSTER_NAME / HELM_VALUES stay global (shared / config knob); K8S_YAML is output-only.
 
     HELM_VALUES=$(ask "Path to a Helm values file (blank to skip) [default if present=${DEFAULT_HELM_VALUES}]: " "${HELM_VALUES:-}")
     if [[ -z "$HELM_VALUES" && -f "$DEFAULT_HELM_VALUES" ]]; then
