@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.5.0...sumo-otel-local-v0.5.1) (2026-06-30)
+
+
+### Bug Fixes
+
+* **deps:** harden install + CI dependency pinning and verification ([#20](https://github.com/bradtho/sumo-otel-local/issues/20)) ([05e5c0a](https://github.com/bradtho/sumo-otel-local/commit/05e5c0a5e591374949d6b10cfd5deee536417d61))
+
 ## [0.5.0](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.4.3...sumo-otel-local-v0.5.0) (2026-06-29)
 
 
