@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.5.1...sumo-otel-local-v0.5.2) (2026-06-30)
+
+
+### Bug Fixes
+
+* **cli:** validate the kindest/node manual tag; tidy install_dependencies ([#22](https://github.com/bradtho/sumo-otel-local/issues/22)) ([1501899](https://github.com/bradtho/sumo-otel-local/commit/15018997cdc4132bbe6d004ef5a66acc28cd48fb))
+
 ## [0.5.1](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.5.0...sumo-otel-local-v0.5.1) (2026-06-30)
 
 
