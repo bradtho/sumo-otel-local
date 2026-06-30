@@ -47,9 +47,6 @@ _All resolved — see [Done › Review backlog (resolved)](#review-backlog--2026
 
 ### LOW severity
 
-- [ ] **Interactive functions are testable only via stdin piping; no seam to inject prompt responses makes multi-prompt flows brittle to test** — `sumo-otel-local.sh:89-111 (confirm/ask), :752-867 (use_existing_podman read loop), :236-283 (select_node_image read loop)` _(testing, medium)_
-  **Fix:** Two options, in increasing effort: (a) For most coverage, lean on ASSUME_YES paths plus targeted stdin here-strings and keep prompt order stable -- add a test that asserts the exact number/order of prompts so reordering is caught. (b) For a stronger seam, route confirm/ask through an indirection that tests can override -- e.g. allow `ASK_RESPONSES`/a stubbable `_read` function -- so a test can map prompt-substring -> answer instead of relying on positional stdin. Document the chosen approach in the (to-be-created) tests/README so contributors keep flows testable.
-
 ### INFO severity
 
 - [ ] **A malformed legacy tag 'v01.1' exists and CHANGELOG.md is absent — minor release-hygiene issues to clear before automation** — `git tags (v01.1); repo root (no CHANGELOG.md); release-please-config.json:9 (changelog-path)` _(maintainability, trivial)_
@@ -362,6 +359,9 @@ corrected during implementation).
 
 ### CI / quality (complete)
 
+- [x] **Interactive functions are testable only via stdin piping; no seam to inject prompt responses makes multi-prompt flows brittle to test** — `sumo-otel-local.sh (confirm/ask/read_secret + the read loops)` _(testing, medium)_
+  **Fix:** (a) lean on ASSUME_YES + here-strings, keep prompt order stable with an order-assertion test, and document the approach; or (b) add a production `_read`/`ASK_RESPONSES` injection seam.
+  **Done (2026-06-30):** Chose **option (a)** (confirmed with the user) — option (b) was declined because the injection seam it describes **already exists**: tests override `confirm`/`ask` as Bash functions with `case "$1"` substring→answer mapping (used ~35× in flow.bats), so adding a production indirection purely for tests would be complexity the project's keep-it-simple, single-script ethos doesn't want. Delivered the two genuinely-missing pieces: (1) a **`tests/README.md`** documenting the conventions — `load_script` (side-effect-free sourcing), the three ways to drive prompts (ASSUME_YES / function-override-by-substring / real-`read`-via-stdin), and the hard-won gotchas (macOS-bats last-command-only → combine load-bearing checks into one `&&`; marker FILES not stub stdout for piped/`$(...)` output; don't shadow bats builtins like `run`; mutation-prove new tests); and (2) a **prompt-order assertion test** for `install_sumo` that records the exact `confirm`/`ask` call sequence to a marker file and asserts it equals `values cluster repo-update wait` — reordering, adding, or dropping a prompt fails it (mutation-proven: dropping the wait confirm reds it). No production change. 147 bats green; shellcheck/shfmt/yamllint clean.
 - [x] **Unblocked the release PR's CI** (2026-06-29) — the first release-please PR
   (`0.4.1`) failed two ways: (1) the `-v` arg test hardcoded `sumo-otel-local 0.4.0`, so
   the `VERSION` bump to `0.4.1` broke it — fixed by deriving the expected string from the

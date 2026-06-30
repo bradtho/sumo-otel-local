@@ -120,6 +120,32 @@ setup() {
     [[ "$output" == *"--kube-context kind-sumo"* && "$output" == *"values.yaml --values "* ]]
 }
 
+@test "install_sumo: interactive prompt order is stable (values -> cluster -> repo-update -> wait)" {
+    # Pins the confirm/ask call ORDER + COUNT so reordering, adding, or dropping a prompt is
+    # caught (the testing-seam finding's option-(a) deliverable). The stubs map prompt
+    # substring -> a short tag recorded to a marker FILE (survives the $(...) subshells `ask`
+    # runs in); any unmapped prompt records "UNEXPECTED-…" and breaks the exact match.
+    local rec="${BATS_TEST_TMPDIR}/prompts"
+    run bash -c 'source "$1"; rec="$2"; trap - ERR EXIT
+        secret_get(){ printf STORED; }     # creds already stored -> no read_secret prompts
+        require_values_file(){ :; }; ensure_helm_repo(){ :; }; select_chart_version(){ printf 5.2.0; }; helm(){ :; }
+        ask(){ case "$1" in
+                 *"Helm values file"*)    echo values  >>"$rec";;
+                 *"Name of the cluster"*) echo cluster >>"$rec";;
+                 *) echo "UNEXPECTED-ASK[$1]" >>"$rec";;
+               esac; printf "%s" "$2"; }
+        confirm(){ case "$1" in
+                     *"repo updates"*)           echo repo-update >>"$rec";;
+                     *"Wait for the collector"*) echo wait        >>"$rec";;
+                     *) echo "UNEXPECTED-CONFIRM[$1]" >>"$rec";;
+                   esac; return 0; }
+        install_sumo >/dev/null 2>&1; rc=$?
+        paste -sd" " "$rec"        # one-line ordered signature of the prompts
+        exit $rc' _ "$SCRIPT" "$rec"
+    # Exact ordered sequence (and count) of the four prompts, asserted as one last command.
+    [ "$status" -eq 0 ] && [ "$output" = "values cluster repo-update wait" ]
+}
+
 @test "install_sumo: credentials never appear on the helm command line" {
     run bash -c 'source "$1"; require_cmd(){ :;}; ensure_helm_repo(){ :;}; secret_get(){ printf SECRETVALUE;}
         helm(){ printf "HELM %s\n" "$*"; }; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
