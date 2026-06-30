@@ -905,3 +905,47 @@ CHART_STUB='helm(){ printf "%s\n" "NAME CHART_VERSION APP_VERSION DESC" "sumolog
     refute_called 'install_binary /tmp/(jq|kubectl|kind)$'
     [[ "$output" == *"SCRATCH_GONE"* ]]
 }
+
+@test "install_dependencies: no-brew path fails fast with a clear message when curl is missing" {
+    run bash -c '
+        source "$1"; trap - ERR EXIT
+        confirm() { return 1; }              # would pick direct-download, but the curl guard fires first
+        command() {
+            if [ "$1" = "-v" ]; then
+                case "$2" in
+                    brew|curl) return 1 ;;       # no Homebrew, and no curl on PATH
+                    *) builtin command "$@" ;;
+                esac
+            else builtin command "$@"; fi
+        }
+        install_dependencies
+    ' _ "$SCRIPT"
+    # The standard require_cmd message, not a raw "curl: command not found" under the ERR trap.
+    [[ "$output" == *"required command(s) not found: curl"* ]] && [ "$status" -ne 0 ]
+}
+
+@test "install_dependencies: no-brew direct path guards curl, tar (helm), and unzip (macOS Podman)" {
+    run bash -c '
+        source "$1"; trap - ERR EXIT
+        scratch="$2"; calls="$3"
+        OS=darwin; ARCH=arm64                  # force the macOS Podman (.zip) branch even on Linux CI
+        confirm() { return 1; }                # decline Homebrew -> direct-download path
+        command() {
+            if [ "$1" = "-v" ]; then
+                case "$2" in
+                    brew|jq|kubectl|helm|kind|docker|podman) return 1 ;;  # all absent -> every block runs
+                    *) builtin command "$@" ;;
+                esac
+            else builtin command "$@"; fi
+        }
+        # Record require_cmd targets (instead of enforcing) so the whole path runs.
+        require_cmd() { local c; for c in "$@"; do echo "require_cmd $c" >>"$calls"; done; }
+        mktemp() { mkdir -p "$scratch"; printf "%s\n" "$scratch"; }
+        curl() { local out="" prev=""; for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done; [ -n "$out" ] && : >"$out"; return 0; }
+        verify_sha256() { :; }; remote_sha256() { echo deadbeef; }
+        tar() { :; }; unzip() { :; }; kubectl() { :; }; install_binary() { :; }
+        install_dependencies
+    ' _ "$SCRIPT" "$BATS_TEST_TMPDIR/scratch" "$CALLS"
+    # All three guards fire on the macOS no-runtime path (chained -> each load-bearing on macOS bats).
+    assert_called "^require_cmd curl$" && assert_called "^require_cmd tar$" && assert_called "^require_cmd unzip$"
+}

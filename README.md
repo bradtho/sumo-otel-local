@@ -18,7 +18,9 @@ asks which to use; otherwise it uses whichever is present.
 - **A container runtime: Docker or Podman.** If neither is installed, `--install` /
   `--init` will offer to install Podman (via Homebrew on macOS, or with guidance on
   Linux).
-- **macOS:** [Homebrew](https://brew.sh/) — used to install the remaining tools.
+- **macOS:** [Homebrew](https://brew.sh/) — used to install the remaining tools. If you
+  decline Homebrew, the direct-download fallback needs `curl`, `tar`, and `unzip` (all
+  ship with macOS; the Podman release is a `.zip`).
 - **Linux:** `curl` and `tar` — the script downloads the remaining tools directly.
 - Remaining CLIs (`kind`, `kubectl`, `helm`, `jq`) are installed for you by
   `--install` / `--init` if they are missing.

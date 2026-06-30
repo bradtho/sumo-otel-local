@@ -411,6 +411,11 @@ function install_dependencies {
         fi
         brew install --quiet "${brew_pkgs[@]}"
     elif ! command -v brew &>/dev/null; then
+        # Both branches below fetch over the network with curl (the Homebrew installer
+        # download, and every direct-download). Fail fast with the standard clear message
+        # if curl is missing (e.g. a minimal Linux image) instead of a raw
+        # 'curl: command not found' under the ERR trap.
+        require_cmd curl
         if confirm "Homebrew is not installed. Install it?" n; then
             # Run a PINNED, checksum-verified copy of the Homebrew installer rather than
             # piping mutable HEAD straight into a shell. Surface the exact source so the
@@ -455,6 +460,7 @@ function install_dependencies {
 
             if ! command -v helm &>/dev/null; then
                 echo "Installing Helm ${HELM_VERSION}..."
+                require_cmd tar # the pinned release tarball is extracted with tar below
                 # Download the pinned helm release tarball directly and verify its
                 # published SHA-256 before extracting — avoids executing the get-helm-3
                 # bootstrap script from a mutable master ref. Tarball lays out as
@@ -470,6 +476,7 @@ function install_dependencies {
             if ! command -v docker &>/dev/null && ! command -v podman &>/dev/null; then
                 echo "Installing Podman ${PODMAN_VERSION}..."
                 if [[ "$OS" == "darwin" ]]; then
+                    require_cmd unzip # the darwin release ships as a .zip, extracted below
                     # The release tag carries a leading 'v' (used in the URL); the zip's
                     # internal directory does not (podman-6.0.0/, not podman-v6.0.0/).
                     ver="${PODMAN_VERSION#v}"
