@@ -1359,25 +1359,36 @@ EOF
     echo "Note: the rendered Secret uses placeholder credentials; deploy with -i/-m to inject real ones." >&2
 }
 
-function uninstall {
+# Shared teardown preamble for uninstall/purge: ensure kind is present and point KinD at
+# the runtime that backs the cluster, so it can find and delete it. select_runtime failure
+# is a clean exit (not the ERR trap), matching the originals.
+function prepare_teardown {
     require_cmd kind
     # Match KinD to the runtime that backs the cluster so it can find/delete it.
     if ! select_runtime; then exit 1; fi
     set_kind_provider
+}
+
+# Delete the named KinD cluster. CLUSTER_NAME is resolved by confirm_destructive (the
+# caller must run it first). Shared by uninstall/purge.
+function delete_kind_cluster {
+    echo "Deleting Cluster: ${CLUSTER_NAME}"
+    run_cmd kind delete cluster --name "${CLUSTER_NAME}"
+}
+
+function uninstall {
+    prepare_teardown
 
     echo "Caution: This will delete the cluster"
     confirm_destructive "delete the cluster"
-    echo "Deleting Cluster: ${CLUSTER_NAME}"
-    run_cmd kind delete cluster --name "${CLUSTER_NAME}"
+    delete_kind_cluster
     if [[ "$CONTAINER_RUNTIME" == "podman" && "$OS" == "darwin" ]]; then
         echo "Leaving Podman machine intact (use --purge to remove it)."
     fi
 }
 
 function purge {
-    require_cmd kind
-    if ! select_runtime; then exit 1; fi
-    set_kind_provider
+    prepare_teardown
 
     # Podman machines only exist with Podman on macOS; under Docker (or Linux
     # Podman) there is no machine to remove.
@@ -1392,8 +1403,7 @@ function purge {
     fi
 
     confirm_destructive "delete the cluster and remove the Podman machine"
-    echo "Deleting Cluster: ${CLUSTER_NAME}"
-    run_cmd kind delete cluster --name "${CLUSTER_NAME}"
+    delete_kind_cluster
     if [[ "$has_machine" == "yes" && -n "$running_machine" ]]; then
         echo "Stopping and Removing the - ${running_machine} - Podman Machine..."
         podman machine stop "${running_machine}"

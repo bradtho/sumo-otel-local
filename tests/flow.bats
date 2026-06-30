@@ -73,6 +73,33 @@ setup() {
     assert_called '^secret_delete sumologic_access_key'
 }
 
+# --- shared teardown skeleton (prepare_teardown / delete_kind_cluster) -------
+# uninstall and purge share a preamble (require_cmd kind -> select_runtime ->
+# set_kind_provider) and the kind-delete step; guard that the extraction didn't drop
+# or reorder a preamble step, and that a runtime-selection failure still aborts cleanly.
+
+@test "prepare_teardown: uninstall runs the full preamble before the kind delete" {
+    # Record the preamble steps (setup stubs them as silent no-ops) so a dropped step shows.
+    require_cmd() { echo "require_cmd $*" >>"$CALLS"; }
+    select_runtime() {
+        echo "select_runtime" >>"$CALLS"
+        return 0
+    }
+    set_kind_provider() { echo "set_kind_provider" >>"$CALLS"; }
+    FORCE=yes ASSUME_YES="" run uninstall
+    # Chained so each step is load-bearing on macOS bats (only a test's last command counts).
+    [ "$status" -eq 0 ] && assert_called '^require_cmd kind' && assert_called '^select_runtime' \
+        && assert_called '^set_kind_provider' && assert_called '^kind delete cluster --name sumo'
+}
+
+@test "prepare_teardown: a select_runtime failure aborts before deleting (no kind delete)" {
+    run bash -c 'source "$1"; require_cmd(){ :;}; set_kind_provider(){ :;}
+        select_runtime(){ return 1; }            # runtime cannot be selected
+        kind(){ echo CALLED_KIND; }; FORCE=yes; ASSUME_YES=""; uninstall' _ "$SCRIPT"
+    # Combined (load-bearing last command): clean exit 1 AND nothing was deleted.
+    [[ "$output" != *"CALLED_KIND"* ]] && [ "$status" -eq 1 ]
+}
+
 # --- install_sumo / output arg-building (run in a subshell to contain their
 #     EXIT trap so it cannot interfere with bats teardown) --------------------
 
