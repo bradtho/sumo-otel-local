@@ -146,6 +146,23 @@ setup() {
     [ "$status" -eq 0 ] && [ "$output" = "values cluster repo-update wait" ]
 }
 
+@test "install_sumo: unstored credentials prompt cleanly, with no spurious exit-44 ERR-trap report" {
+    # The live-test symptom: `security` exits 44 (errSecItemNotFound) when nothing is stored
+    # yet — the normal first run — and the ERR trap printed "command failed (exit 44) /
+    # Nothing has been changed" before EACH credential prompt. Drive the REAL on_error trap.
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "on_error \${LINENO}" ERR
+        SECRET_BACKEND=keychain; security(){ return 44; }   # nothing stored
+        require_cmd(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
+        helm(){ :;}; secret_set(){ :;}; read_secret(){ printf DUMMY; }
+        ASSUME_YES=""; install_sumo </dev/null' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    # Combined, load-bearing last command: NO exit-44/teardown noise AND both real not-found
+    # prompts still appear. Reverting secret_get re-fires the trap and trips the first half.
+    [[ "$output" != *"exit 44"* && "$output" != *"Nothing has been changed"* \
+        && "$output" == *"Access ID not found in secret storage"* \
+        && "$output" == *"Access Key not found in secret storage"* ]]
+}
+
 @test "install_sumo: credentials never appear on the helm command line" {
     run bash -c 'source "$1"; require_cmd(){ :;}; ensure_helm_repo(){ :;}; secret_get(){ printf SECRETVALUE;}
         helm(){ printf "HELM %s\n" "$*"; }; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"

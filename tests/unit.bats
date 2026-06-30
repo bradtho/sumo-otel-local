@@ -53,6 +53,38 @@ setup() {
     [ "$output" = "SUMOLOGIC_ACCESS_ID" ]
 }
 
+# --- secret_get -------------------------------------------------------------
+
+# Regression for the live-test "Error: command failed (exit 44)" noise: `security` exits 44
+# (errSecItemNotFound) when a secret isn't stored — the normal first-run path. secret_get is
+# captured with $(...), so under `set -E` a non-zero return there tripped the ERR trap INSIDE
+# the command-substitution subshell. secret_get must instead return 0 with empty stdout.
+@test "secret_get: a missing secret returns empty and does NOT trip the ERR trap" {
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo TRAP_FIRED" ERR
+        SECRET_BACKEND=keychain; security(){ return 44; }
+        val=$(secret_get sumologic_access_id); rc=$?
+        printf "rc=%s val=[%s]\n" "$rc" "$val"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"TRAP_FIRED"* ]]
+    # Combined so BOTH are load-bearing on macOS bats (last-command-only): clean rc AND empty.
+    [[ "$output" == *"rc=0 val=[]"* ]]
+}
+
+@test "secret_get (keychain): prints the stored value when present" {
+    run bash -c 'source "$1"; SECRET_BACKEND=keychain
+        security(){ printf "THEVALUE\n"; }   # find-generic-password -w prints the secret
+        printf "[%s]" "$(secret_get sumologic_access_id)"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ "$output" = "[THEVALUE]" ]
+}
+
+@test "secret_get (env): reads the uppercased env var, empty when unset (safe under set -u)" {
+    run bash -c 'source "$1"; set -u; SECRET_BACKEND=env; SUMOLOGIC_ACCESS_ID=fromenv
+        printf "[%s][%s]" "$(secret_get sumologic_access_id)" "$(secret_get sumologic_access_key)"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ "$output" = "[fromenv][]" ]
+}
+
 # --- confirm / ask (unattended behaviour) -----------------------------------
 
 @test "confirm: returns yes under ASSUME_YES without reading stdin" {
@@ -109,6 +141,37 @@ setup() {
     [ "$status" -eq 1 ] # default n -> rejected
     run bash -c 'source "$1"; set -Eeuo pipefail; ASSUME_YES=""; confirm "ok?" y </dev/null' _ "$SCRIPT"
     [ "$status" -eq 0 ] # default y -> accepted
+}
+
+# --- valid_cluster_name / ask_cluster_name ----------------------------------
+
+# Guards the kind-<name> kube context the script pins everywhere: a stray/pasted line
+# consumed by the prompt must not become a bogus cluster name (the live-test
+# "context kind-Have a question... does not exist" failure).
+@test "valid_cluster_name: accepts RFC1123-ish names, rejects spaces/uppercase/junk" {
+    run bash -c 'source "$1"
+        for ok in sumo my-cluster sumo.1 a1; do
+            valid_cluster_name "$ok" || { echo "BAD-REJECT [$ok]"; exit 1; }; done
+        for bad in "Have a question" UPPER "with space" a/b "" "-lead" ".lead"; do
+            valid_cluster_name "$bad" && { echo "BAD-ACCEPT [$bad]"; exit 1; }; done
+        echo OK' _ "$SCRIPT"
+    [ "$status" -eq 0 ] && [ "$output" = "OK" ]
+}
+
+@test "ask_cluster_name: re-prompts on an invalid name, then accepts a valid one" {
+    # Feed an invalid line then a valid one on the same stdin; the resolved name is the only
+    # stdout, the rejection note goes to stderr (combined here by `run`). Combined assertion
+    # keeps both halves load-bearing on macOS bats.
+    run bash -c 'source "$1"; ASSUME_YES=""
+        printf "%s\n%s\n" "Bad Name" "good-1" | ask_cluster_name "Name: " sumo' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Invalid cluster name 'Bad Name'"* && "$output" == *"good-1"* ]]
+}
+
+@test "ask_cluster_name: ASSUME_YES returns the (valid) default without reading stdin" {
+    run bash -c 'source "$1"; ASSUME_YES=yes; ask_cluster_name "Name: " sumo </dev/null' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ "$output" = "sumo" ]
 }
 
 # --- MIN_* validation (top-level guard) -------------------------------------

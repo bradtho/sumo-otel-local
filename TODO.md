@@ -71,6 +71,17 @@ _P4 backlog clear — see the Done section below._
 
 ## Done
 
+### Live-testing fixes — 2026-07-01
+
+Found while running `./sumo-otel-local.sh -i` end-to-end (Podman on macOS).
+
+- [x] **Spurious `Error: command failed (exit 44) ... Nothing has been changed` printed before every credential prompt on a fresh run** — `sumo-otel-local.sh:secret_get; install_sumo (ACCESS_ID/ACCESS_KEY lookups)` _(bug, small)_
+  **Symptom:** On the first run (no stored creds), the ERR-trap report fired twice — once before "Access ID not found" and once before "Access Key not found" — even though "not found" is the normal path. Root cause: `secret_get` returned the backend's non-zero status (`security` exits 44 = `errSecItemNotFound`), and because it's captured with `$(...)` under `set -E`, that non-zero tripped the ERR trap **inside the command-substitution subshell** — the `if !` at the call site can't reach in to exempt it (the same hazard the `endpoints` jq pipeline documents).
+  **Done (2026-07-01):** `secret_get` now **always returns 0** and signals "not stored" via empty stdout; each backend lookup is made errexit-exempt (`... || true`). Call sites detect not-found with `[[ -z "$ACCESS_ID" ]]`. Verified empirically on Bash 3.2.57 that this is the only structure that stays clean (`return 1` and `|| rc=$?` both still trip the trap). Added 3 `secret_get` unit tests + 1 end-to-end `install_sumo` flow test; mutation-proven (reverting `secret_get` fails both regression tests). Lint + 157 bats green.
+- [x] **A stray stdin line became the cluster name → `--kube-context "kind-Have a question, bug, or feature request?..."` → "context does not exist"** — `sumo-otel-local.sh:init_cluster, install_sumo, reinstall, endpoints, forward` _(bug, medium)_
+  **Symptom:** Type-ahead/pasted text buffered during the long `brew`/`kind create` steps was consumed by later prompts; the cluster-name `ask` read kind's banner line, producing a bogus `kind-<junk>` kube context that only failed much later in `helm`. No validation rejected it.
+  **Done (2026-07-01):** Added `valid_cluster_name` (RFC-1123-ish: `^[a-z0-9][a-z0-9.-]*$`) and an `ask_cluster_name` wrapper that re-prompts on an invalid name (interactive) and returns the always-valid default unread under `-y`/EOF. Routed all five cluster-name prompts through it. Added 3 unit tests (truth table + re-prompt + unattended); mutation-proven. Lint + bats green. (`confirm_destructive`'s type-the-name gate is intentionally left as-is — different, self-validating semantics.)
+
 ### Review backlog — 2026-06-25 audit (resolved)
 
 Completed findings from the 2026-06-25 multi-agent audit, moved here from the open

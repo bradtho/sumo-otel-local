@@ -536,6 +536,37 @@ function valid_node_tag {
     [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
 }
 
+# True if $1 is a usable KinD cluster name. KinD names (and the kind-<name> kube context
+# the script pins everywhere) are RFC-1123-ish: a leading lowercase letter/digit, then
+# lowercase letters, digits, '-' or '.'. Reject anything else early so a stray line —
+# e.g. type-ahead/pasted text consumed by the prompt while a long step runs — can't become
+# CLUSTER_NAME and produce a bogus `kind-<junk>` context that only fails much later with a
+# confusing "context ... does not exist".
+function valid_cluster_name {
+    [[ "$1" =~ ^[a-z0-9][a-z0-9.-]*$ ]]
+}
+
+# Prompt for a cluster name with a default, re-prompting until the entered value is a valid
+# KinD name (interactive) — the default is always valid, so unattended/EOF runs return it
+# unread on the first pass. UI goes to stderr so the result is safe to capture with $(...).
+function ask_cluster_name {
+    local prompt=$1 default=$2 name
+    while true; do
+        name=$(ask "$prompt" "$default")
+        if valid_cluster_name "$name"; then
+            printf '%s' "$name"
+            return 0
+        fi
+        echo "Invalid cluster name '${name}'. Use lowercase letters, digits, '-' or '.' (e.g. '${default}')." >&2
+        # Unattended (ask returns the default without reading): never loop forever. The
+        # default is validated above, so this only guards an explicitly-bad default.
+        if [[ -n "$ASSUME_YES" ]]; then
+            printf '%s' "$default"
+            return 0
+        fi
+    done
+}
+
 # Prompt for a kindest/node image and echo the chosen ref (e.g.
 # kindest/node:v1.32.2) to stdout. All prompts/UI go to stderr so the result is
 # safe to capture with $(...). Echoes nothing if the user opts for kind's default.
@@ -1020,8 +1051,9 @@ function init_cluster {
         fi
     fi
 
-    # Cluster name is asked once, regardless of the version choice.
-    CLUSTER_NAME=$(ask "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
+    # Cluster name is asked once, regardless of the version choice. Validated so a stray
+    # line can't yield a bogus kind-<junk> context (see ask_cluster_name/valid_cluster_name).
+    CLUSTER_NAME=$(ask_cluster_name "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
 
     # Handle an existing cluster of the same name instead of letting kind error out.
     if cluster_exists "$CLUSTER_NAME"; then
@@ -1127,17 +1159,27 @@ function secret_env_var {
     printf '%s' "$1" | tr '[:lower:]' '[:upper:]'
 }
 
-# Print a stored secret to stdout. Returns non-zero if it is not found.
+# Print a stored secret to stdout, or NOTHING if it isn't stored; ALWAYS returns 0.
+# Callers detect "not found" by an empty result, NOT a non-zero status. Why: secret_get is
+# captured with $(...), and under `set -E` a non-zero return trips the ERR trap *inside* the
+# command-substitution subshell — the `if !`/`||` at the call site can't reach in to exempt
+# it (same hazard the `endpoints` jq pipeline documents). `security` exits 44
+# (errSecItemNotFound) and `secret-tool` exits 1 when the item is absent — the NORMAL
+# first-run path — so each lookup is made errexit-exempt with `|| true` and the result is
+# returned via stdout only. Returning non-zero here surfaced a spurious "command failed
+# (exit 44)" report before every "not found" prompt.
 function secret_get {
-    local name=$1 var
+    local name=$1 var out=""
     case "$SECRET_BACKEND" in
-        keychain) security find-generic-password -s "$name" -w 2>/dev/null ;;
-        secret-tool) secret-tool lookup service "$name" 2>/dev/null ;;
+        keychain) out=$(security find-generic-password -s "$name" -w 2>/dev/null || true) ;;
+        secret-tool) out=$(secret-tool lookup service "$name" 2>/dev/null || true) ;;
         env)
             var=$(secret_env_var "$name")
-            [[ -n "${!var:-}" ]] && printf '%s' "${!var}"
+            out=${!var:-}
             ;;
     esac
+    [[ -n "$out" ]] && printf '%s' "$out"
+    return 0
 }
 
 # Store a secret for reuse on the next run.
@@ -1180,7 +1222,11 @@ function install_sumo {
 
     ## Securely handle ACCESS_ID and ACCESS_KEY
 
-    if ! ACCESS_ID=$(secret_get sumologic_access_id); then
+    # secret_get always returns 0 and prints the value (empty when unstored); detect "not
+    # stored" by the empty result rather than its exit status — see secret_get for why a
+    # non-zero return there would trip the ERR trap inside this $(...) capture.
+    ACCESS_ID=$(secret_get sumologic_access_id)
+    if [[ -z "$ACCESS_ID" ]]; then
         if [[ -n "$ASSUME_YES" ]]; then
             echo "Error: Access ID not found and running unattended. Set SUMOLOGIC_ACCESS_ID or store it first." >&2
             exit 1
@@ -1190,7 +1236,8 @@ function install_sumo {
         secret_set sumologic_access_id "$ACCESS_ID"
     fi
 
-    if ! ACCESS_KEY=$(secret_get sumologic_access_key); then
+    ACCESS_KEY=$(secret_get sumologic_access_key)
+    if [[ -z "$ACCESS_KEY" ]]; then
         if [[ -n "$ASSUME_YES" ]]; then
             echo "Error: Access Key not found and running unattended. Set SUMOLOGIC_ACCESS_KEY or store it first." >&2
             exit 1
@@ -1207,7 +1254,7 @@ function install_sumo {
     # Reuse an already-resolved CLUSTER_NAME as the default (e.g. set by reinstall) so the
     # uninstall and reinstall target the same cluster; falls back to DEFAULT_CLUSTER_NAME
     # for a direct -m/-i where it isn't pre-set (unchanged behavior there).
-    CLUSTER_NAME=$(ask "Name of the cluster [default=${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}]: " "${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}")
+    CLUSTER_NAME=$(ask_cluster_name "Name of the cluster [default=${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}]: " "${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}")
 
     # Always ensure the repo is registered; the prompt only controls refreshing it.
     if confirm "Check for Helm repo updates?" n; then
@@ -1301,7 +1348,7 @@ function reinstall {
     # Resolve the cluster once and pin --kube-context so the uninstall and the reinstall
     # target the SAME cluster and neither touches a stray current context. install_sumo
     # (called below) reuses this CLUSTER_NAME as its prompt default.
-    CLUSTER_NAME=$(ask "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
+    CLUSTER_NAME=$(ask_cluster_name "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
     local cluster_ctx="kind-${CLUSTER_NAME}"
     # Only uninstall if a release is actually present, so a reinstall also works as a plain
     # install after a partial/failed deploy. `exit 1` (not return) keeps a stuck-uninstall
@@ -1600,7 +1647,7 @@ function set_action {
 function endpoints {
     require_cmd kubectl jq
     local cluster_name secret_json
-    cluster_name=$(ask "Cluster name [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
+    cluster_name=$(ask_cluster_name "Cluster name [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
     if ! secret_json=$(kubectl --context "kind-${cluster_name}" -n sumologic get secret sumologic -o json 2>/dev/null); then
         echo "Error: could not read the 'sumologic' secret (cluster unreachable, or the collector isn't installed)." >&2
         exit 1
@@ -1626,7 +1673,7 @@ function endpoints {
 function forward {
     require_cmd kubectl
     local cluster_name cluster_ctx rc
-    cluster_name=$(ask "Cluster name [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
+    cluster_name=$(ask_cluster_name "Cluster name [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
     cluster_ctx="kind-${cluster_name}"
     if ! kubectl --context "$cluster_ctx" -n sumologic get svc sumo-otelcol >/dev/null 2>&1; then
         echo "Error: svc/sumo-otelcol not found in namespace sumologic (is the collector installed and the cluster reachable?)." >&2
