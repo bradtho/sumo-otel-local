@@ -165,7 +165,7 @@ HOMEBREW_INSTALL_SHA256="99287f194a8b3c9e6b0203a11a5fa54518be57209343e6bb954dec4
 # Script version. Kept in sync with the published GitHub Release tag; printed by
 # -v/--version without any network calls. The trailing annotation lets
 # release-please rewrite this line automatically when it cuts a release.
-VERSION="0.5.2" # x-release-please-version
+VERSION="0.5.3" # x-release-please-version
 
 # Default KinD cluster name, used by create and teardown. Honors a CLUSTER_NAME set in
 # the environment / config file, so every name prompt (which defaults to this) and the

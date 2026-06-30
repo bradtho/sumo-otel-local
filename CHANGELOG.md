@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.3](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.5.2...sumo-otel-local-v0.5.3) (2026-06-30)
+
+
+### Bug Fixes
+
+* **cli:** silence spurious exit-44 ERR-trap noise and validate cluster names ([#24](https://github.com/bradtho/sumo-otel-local/issues/24)) ([533493c](https://github.com/bradtho/sumo-otel-local/commit/533493ca80f23e9ba14ecf15f35396dce5b0b3c7))
+
 ## [0.5.2](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.5.1...sumo-otel-local-v0.5.2) (2026-06-30)
 
 
