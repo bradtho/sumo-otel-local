@@ -1010,6 +1010,25 @@ function require_values_file {
     fi
 }
 
+# Prompt for the Helm values file, falling back to the bundled default when one
+# exists, and validate any named path. Values files are optional, so a blank result
+# (no default present) is fine. Prints the resolved path to stdout (the prompt/UI
+# goes to stderr via `ask`), so callers capture it: `HELM_VALUES=$(prompt_values_file)
+# || exit 1`. A named-but-bad path makes require_values_file exit this command
+# substitution non-zero, which the caller's `|| exit 1` turns into a clean script exit
+# (mirroring the `ACCESS_KEY=$(read_secret …) || exit 1` idiom).
+function prompt_values_file {
+    local vf
+    vf=$(ask "Path to a Helm values file (blank to skip) [default if present=${DEFAULT_HELM_VALUES}]: " "${HELM_VALUES:-}")
+    # Blank falls back to the bundled default only when it actually exists.
+    if [[ -z "$vf" && -f "$DEFAULT_HELM_VALUES" ]]; then
+        vf="$DEFAULT_HELM_VALUES"
+    fi
+    # Optional, but if one is named it must exist and be readable.
+    [[ -n "$vf" ]] && require_values_file "$vf"
+    printf '%s' "$vf"
+}
+
 # Ensure the sumologic Helm repo is registered before any template/upgrade.
 # `helm repo add --force-update` is idempotent (adds it, or updates the URL if it
 # changed). Pass "update" to also refresh the repo index.
@@ -1113,13 +1132,7 @@ function install_sumo {
 
     echo "A Helm values file is optional; the chart can install with --set values alone."
     echo "Example values live in the examples folder, e.g. examples/metrics_interval.yaml"
-    HELM_VALUES=$(ask "Path to a Helm values file (blank to skip) [default if present=${DEFAULT_HELM_VALUES}]: " "${HELM_VALUES:-}")
-    # Blank falls back to the default file only when it actually exists.
-    if [[ -z "$HELM_VALUES" && -f "$DEFAULT_HELM_VALUES" ]]; then
-        HELM_VALUES="$DEFAULT_HELM_VALUES"
-    fi
-    # A values file is optional, but if one is named it must exist.
-    [[ -n "$HELM_VALUES" ]] && require_values_file "$HELM_VALUES"
+    HELM_VALUES=$(prompt_values_file) || exit 1
 
     # Reuse an already-resolved CLUSTER_NAME as the default (e.g. set by reinstall) so the
     # uninstall and reinstall target the same cluster; falls back to DEFAULT_CLUSTER_NAME
@@ -1242,11 +1255,7 @@ function output {
     require_cmd helm
     local K8S_YAML # CLUSTER_NAME / HELM_VALUES stay global (shared / config knob); K8S_YAML is output-only.
 
-    HELM_VALUES=$(ask "Path to a Helm values file (blank to skip) [default if present=${DEFAULT_HELM_VALUES}]: " "${HELM_VALUES:-}")
-    if [[ -z "$HELM_VALUES" && -f "$DEFAULT_HELM_VALUES" ]]; then
-        HELM_VALUES="$DEFAULT_HELM_VALUES"
-    fi
-    [[ -n "$HELM_VALUES" ]] && require_values_file "$HELM_VALUES"
+    HELM_VALUES=$(prompt_values_file) || exit 1
     CLUSTER_NAME=$(ask "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
     K8S_YAML=$(ask "Name and Location of the rendered Kubernetes Manifest YAML file. [default=sumologic-rendered.yaml]: " "$DEFAULT_K8S_YAML")
 

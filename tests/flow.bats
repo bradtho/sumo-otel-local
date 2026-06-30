@@ -85,7 +85,12 @@ setup() {
     [[ "$output" == *"fullnameOverride=sumo"* ]]
     [[ "$output" == *"sumologic.falco.enabled=false"* ]]
     [[ "$output" == *"sumologic.logs.systemd.enabled=false"* ]]
-    [[ "$output" == *"--kube-context kind-sumo"* ]] # pinned to the named KinD cluster, not the current context
+    # Final, combined assertion so BOTH halves are load-bearing on macOS bats (which only
+    # checks a test's last command): the context is pinned to the named cluster AND the
+    # resolved values file (blank prompt -> bundled values.yaml) actually reaches the argv,
+    # ahead of the secrets --values. The latter guards the prompt_values_file extraction —
+    # a dropped helper would leave only the secrets --values.
+    [[ "$output" == *"--kube-context kind-sumo"* && "$output" == *"values.yaml --values "* ]]
 }
 
 @test "install_sumo: credentials never appear on the helm command line" {
@@ -414,7 +419,68 @@ setup() {
     [[ "$output" == *"--version 5.2.0"* ]]
     [[ "$output" == *"sumologic.clusterName=sumo"* ]]
     [[ "$output" == *"fullnameOverride=sumo"* ]]
-    [[ "$output" != *"PLACEHOLDER_ACCESS"* ]]
+    # Final, combined assertion so BOTH halves are load-bearing on macOS bats: the resolved
+    # values file reaches the template argv ahead of secrets, AND creds never appear on argv.
+    [[ "$output" == *"values.yaml --values "* && "$output" != *"PLACEHOLDER_ACCESS"* ]]
+}
+
+# --- prompt_values_file (shared helper for install_sumo + output) -----------
+# Extracted from the duplicated prompt-and-default block: prompt -> bundled-default
+# fallback -> validate, printing the resolved path to stdout (UI via `ask` -> stderr).
+# A bad named path makes require_values_file exit non-zero so the caller's `|| exit 1`
+# turns it into a clean script exit. NB: the function has a `local vf`, so the ask
+# stubs use a distinctly-named VF_IN to avoid a dynamic-scoping collision.
+
+# Tests 1-3 capture both the returned value AND `rc=$?` into the marker, then assert
+# the combined `RESULT=[…] RC=[…]` as the single LAST command — so the success path is
+# load-bearing on macOS bats too (which only checks a test's last command). A bare
+# `[ "$status" -eq 0 ]` would be inert here: strict mode is off when sourced, so a
+# failing helper still lets the trailing printf run and the wrapper exits 0.
+
+@test "prompt_values_file: an explicit path is returned (and validated)" {
+    local vf="${BATS_TEST_TMPDIR}/my-values.yaml"
+    : >"$vf" # exists + readable, so the REAL require_values_file passes
+    run bash -c 'source "$1"; VF_IN="$2"
+        ask(){ printf "%s" "$VF_IN"; }   # user types an explicit path
+        out=$(prompt_values_file); rc=$?; printf "RESULT=[%s] RC=[%s]" "$out" "$rc"' _ "$SCRIPT" "$vf"
+    [[ "$output" == *"RESULT=[${vf}] RC=[0]"* ]]
+}
+
+@test "prompt_values_file: blank input falls back to the bundled default when it exists" {
+    local def="${BATS_TEST_TMPDIR}/default-values.yaml"
+    : >"$def"
+    run bash -c 'source "$1"; def="$2"
+        DEFAULT_HELM_VALUES="$def"
+        ask(){ printf ""; }              # blank (Enter)
+        out=$(prompt_values_file); rc=$?; printf "RESULT=[%s] RC=[%s]" "$out" "$rc"' _ "$SCRIPT" "$def"
+    [[ "$output" == *"RESULT=[${def}] RC=[0]"* ]]
+}
+
+@test "prompt_values_file: blank input with no default yields an empty (skip) result" {
+    run bash -c 'source "$1"
+        DEFAULT_HELM_VALUES="/no/such/default.yaml"
+        ask(){ printf ""; }
+        out=$(prompt_values_file); rc=$?; printf "RESULT=[%s] RC=[%s]" "$out" "$rc"' _ "$SCRIPT"
+    [[ "$output" == *"RESULT=[] RC=[0]"* ]] # empty + success -> chart installs with --set values alone
+}
+
+@test "prompt_values_file: a preset HELM_VALUES (env/config knob) threads through on EOF/unattended" {
+    # Regression guard that the `\${HELM_VALUES:-}` default is still passed to `ask` (a mutant
+    # dropping it silently skips the preset file). Drives the REAL ask via closed stdin.
+    local pre="${BATS_TEST_TMPDIR}/preset.yaml"
+    : >"$pre"
+    run bash -c 'source "$1"; HELM_VALUES="$2"; DEFAULT_HELM_VALUES="/no/such/default.yaml"
+        out=$(prompt_values_file </dev/null); rc=$?; printf "RESULT=[%s] RC=[%s]" "$out" "$rc"' _ "$SCRIPT" "$pre"
+    [[ "$output" == *"RESULT=[${pre}] RC=[0]"* ]] # preset returned, not skipped
+}
+
+@test "prompt_values_file: a named-but-missing path exits non-zero with a clear error" {
+    run bash -c 'source "$1"
+        ask(){ printf "%s" "/no/such/file.yaml"; }   # uses the REAL require_values_file
+        prompt_values_file' _ "$SCRIPT"
+    # Combined so both halves are load-bearing on macOS bats: the clear "not found" message
+    # AND the non-zero exit (which the caller's `|| exit 1` turns into a clean script exit).
+    [[ "$output" == *"not found"* ]] && [ "$status" -ne 0 ]
 }
 
 # --- status (read-only doctor; every probe must be non-fatal under errexit) -
