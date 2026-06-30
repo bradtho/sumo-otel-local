@@ -178,8 +178,21 @@ setup() {
     # ensure_*_ready entirely. If it regressed, the REAL select_runtime would run here.
     run bash -c 'source "$1"; kind(){ echo "KIND_RAN $*"; }; DRY_RUN=yes; ASSUME_YES=yes; init_cluster' _ "$SCRIPT"
     [ "$status" -eq 0 ]
-    [[ "$output" != *"KIND_RAN"* ]] # no real cluster created
-    [[ "$output" == *"[dry-run] would run: kind create"* ]] # previewed (asserted last)
+    # No real cluster created AND the preview shows the digest-pinned node image (combined so
+    # both are load-bearing on macOS bats).
+    [[ "$output" != *"KIND_RAN"* ]] \
+        && [[ "$output" == *"[dry-run] would run: kind create"*"--image kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5"* ]]
+}
+
+@test "init_cluster: the default-yes create uses the digest-pinned node image" {
+    run bash -c 'source "$1"; trap - ERR EXIT
+        select_runtime(){ CONTAINER_RUNTIME=docker; return 0; }
+        set_kind_provider(){ :; }; ensure_docker_ready(){ :; }
+        cluster_exists(){ return 1; }        # no existing cluster -> straight to create
+        kind(){ echo "kind $*"; }            # capture the create argv
+        ASSUME_YES=yes; init_cluster' _ "$SCRIPT"
+    [ "$status" -eq 0 ] \
+        && [[ "$output" == *"kind create cluster --name sumo --config"*"--image kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5"* ]]
 }
 
 @test "uninstall --verbose echoes the kind delete before running it" {

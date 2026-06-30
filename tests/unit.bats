@@ -141,11 +141,19 @@ setup() {
     [ -f "$output/values.yaml" ]
 }
 
-@test "KINDEST_NODE_VERSION defaults to the pin and is overridable" {
-    run bash -c 'source "$1"; echo "$KINDEST_NODE_VERSION"' _ "$SCRIPT"
-    [ "$output" = "v1.36.1" ]
-    KINDEST_NODE_VERSION=v1.30.0 run bash -c 'source "$1"; echo "$KINDEST_NODE_VERSION"' _ "$SCRIPT"
-    [ "$output" = "v1.30.0" ]
+@test "KINDEST_NODE_IMAGE: digest-pinned by default; version+digest overridable; empty digest opts out" {
+    # One subshell per case so the env overrides don't leak; assert the combined marker as a
+    # single last command (every check load-bearing on macOS bats too).
+    run bash -c '
+        src="$1"
+        d=$(source "$src"; echo "$KINDEST_NODE_IMAGE")
+        b=$(KINDEST_NODE_VERSION=v1.35.5 KINDEST_NODE_DIGEST=sha256:ce97; source "$src"; echo "$KINDEST_NODE_IMAGE")
+        c=$(KINDEST_NODE_VERSION=v1.35.5 KINDEST_NODE_DIGEST=; source "$src"; echo "$KINDEST_NODE_IMAGE")
+        printf "DEFAULT=[%s] BOTH=[%s] CLEAR=[%s]" "$d" "$b" "$c"
+    ' _ "$SCRIPT"
+    [[ "$output" == *"DEFAULT=[kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5]"* ]] \
+        && [[ "$output" == *"BOTH=[kindest/node:v1.35.5@sha256:ce97]"* ]] \
+        && [[ "$output" == *"CLEAR=[kindest/node:v1.35.5]"* ]] # empty digest -> tag-only, no mismatch
 }
 
 @test "Homebrew installer is pinned to a commit (no mutable HEAD) and checksum-verified" {

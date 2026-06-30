@@ -196,8 +196,11 @@ cluster with the **same `kind` + `kindest/node`** (so render/dry-run match what 
 deploy), and [Renovate](#contributing) keeps these pins current via annotations next to
 each constant. `KINDEST_NODE_VERSION` is the default node image kind `v0.32.0` ships and
 tests with, so it's coupled to `KIND_VERSION` (bump them together) — that's why it isn't
-Renovate-tracked. You can still pick another version interactively — see
-[Kubernetes version](#kubernetes-version).
+Renovate-tracked. The node image is **digest-pinned** (`kindest/node:v1.36.1@sha256:…`, the
+digest from kind's release notes) so a re-pushed tag can't change what runs; to use a
+different version, override `KINDEST_NODE_VERSION` and either set `KINDEST_NODE_DIGEST` to
+the matching digest or clear it (`KINDEST_NODE_DIGEST=`) for a tag-only ref. You can also
+pick another version interactively — see [Kubernetes version](#kubernetes-version).
 
 ### Project config file
 

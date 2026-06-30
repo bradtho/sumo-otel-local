@@ -151,13 +151,17 @@ jobs:
           [[ "${#SUMO_COMMON_SET[@]}" -gt 0 ]] || { echo "Could not read SUMO_COMMON_SET"; exit 1; }
           [[ -n "$HELM_VERSION" ]] || { echo "Could not read HELM_VERSION"; exit 1; }
           [[ -n "$KIND_VERSION" ]] || { echo "Could not read KIND_VERSION"; exit 1; }
-          [[ -n "$KINDEST_NODE_VERSION" ]] || { echo "Could not read KINDEST_NODE_VERSION"; exit 1; }
+          # KINDEST_NODE_IMAGE is the full digest-pinned ref derived from KINDEST_NODE_VERSION
+          # + KINDEST_NODE_DIGEST, so validating it covers both.
+          [[ -n "$KINDEST_NODE_IMAGE" ]] || { echo "Could not read KINDEST_NODE_IMAGE"; exit 1; }
           echo "CHART_VERSION=$SUMO_CHART_VERSION" >> "$GITHUB_ENV"
           echo "COMMON_SET=${SUMO_COMMON_SET[*]}" >> "$GITHUB_ENV"
           echo "HELM_VERSION=$HELM_VERSION" >> "$GITHUB_ENV"
           echo "KIND_VERSION=$KIND_VERSION" >> "$GITHUB_ENV"
-          echo "KINDEST_NODE_VERSION=$KINDEST_NODE_VERSION" >> "$GITHUB_ENV"
-          echo "Chart $SUMO_CHART_VERSION; helm $HELM_VERSION; kind $KIND_VERSION; node $KINDEST_NODE_VERSION; common overrides: ${SUMO_COMMON_SET[*]}"
+          # The full digest-pinned ref (kindest/node:<ver>@sha256:…) so CI's dry-run runs on
+          # exactly the image users get from init_cluster.
+          echo "KINDEST_NODE_IMAGE=$KINDEST_NODE_IMAGE" >> "$GITHUB_ENV"
+          echo "Chart $SUMO_CHART_VERSION; helm $HELM_VERSION; kind $KIND_VERSION; node $KINDEST_NODE_IMAGE; common overrides: ${SUMO_COMMON_SET[*]}"
 
       # Pin helm to the same version the script pins (HELM_VERSION), so CI renders and
       # dry-runs with exactly the helm users get from the direct-download path.
@@ -227,14 +231,15 @@ jobs:
           done
           exit "$fail"
 
-      # Pin kind + the node image to the script's KIND_VERSION / KINDEST_NODE_VERSION so
-      # CI's server-side dry-run runs on exactly the Kubernetes the script ships.
+      # Pin kind + the node image to the script's KIND_VERSION / KINDEST_NODE_IMAGE (the
+      # full digest-pinned ref) so CI's server-side dry-run runs on exactly the Kubernetes
+      # image the script ships.
       - name: Create KinD cluster
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:
           cluster_name: ci-mock
           version: ${{ env.KIND_VERSION }}
-          node_image: kindest/node:${{ env.KINDEST_NODE_VERSION }}
+          node_image: ${{ env.KINDEST_NODE_IMAGE }}
 
       # Pre-apply the chart's CRDs so the custom resources it renders
       # (OpenTelemetryCollector, ServiceMonitor, PrometheusRule, ...) validate
