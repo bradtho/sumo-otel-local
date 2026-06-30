@@ -588,6 +588,36 @@ run_status() {
     [[ "$output" == *"PODMAN machine init --memory 20000"* ]]
 }
 
+# --- use_existing_podman scoping --------------------------------------------
+# Regression guard for the unscoped-locals fix: the function must select a
+# qualifying machine AND leave no working variable behind in the global scope.
+# (On the pre-fix code all 16 scalars leaked; the four arrays were already local
+# via `declare -a`, which localizes inside a function in Bash 3.2.)
+
+@test "use_existing_podman: picks a qualifying machine and leaks no globals" {
+    run bash -c 'source "$1"
+        trap - ERR EXIT
+        MIN_MEM_MB=2048; MIN_CPU=1; ASSUME_YES=yes
+        podman(){ if [ "$*" = "machine list --format json" ]; then
+            printf "%s" "[{\"Name\":\"sumo\",\"Memory\":21474836480,\"CPUs\":8,\"Running\":true}]"
+          else echo "PODMAN $*"; fi; }
+        use_existing_podman >/dev/null   # menu output is irrelevant; rc + leak check below
+        rc=$?
+        leaked=""
+        for v in machines_json index machine_count name mem_raw cpu status mem_mb \
+                 display_number create_option exit_option selection selection_index \
+                 chosen_machine machine_running valid_names valid_memories valid_cpus valid_statuses; do
+            eval "val=\${$v:-}"
+            [ -z "$val" ] || leaked="$leaked $v=$val"
+        done
+        echo "RC=$rc"
+        echo "LEAKED:${leaked}"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RC=0"* ]]      # selected the running, qualifying machine
+    [[ "$output" == *"LEAKED:"* ]]   # the marker line printed at all
+    [[ "$output" != *"LEAKED: "* ]]  # ...with nothing after the colon -> no leaked vars
+}
+
 # --- select_chart_version ---------------------------------------------------
 
 # helm stub emitting a `helm search repo --versions` style table (with an unrelated

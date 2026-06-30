@@ -794,12 +794,17 @@ function new_podman {
 
 function use_existing_podman {
     # Minimum requirements come from MIN_MEM_MB / MIN_CPU (set/overridable above).
+    # Scope every working variable to the function — these were previously unscoped
+    # and leaked into the global environment. `local -a` localizes arrays in Bash 3.2
+    # exactly as `local` does scalars (verified on 3.2.57), so no `declare`/global
+    # workaround is needed.
+    local machines_json index machine_count i name mem_raw cpu status mem_mb
+    local display_number create_option exit_option selection selection_index
+    local chosen_machine machine_running
+    local -a valid_names valid_memories valid_cpus valid_statuses
 
     # Get list of all machines with their specs
     machines_json=$(podman machine list --format json)
-
-    # Arrays to hold valid machines
-    declare -a valid_names valid_memories valid_cpus valid_statuses
 
     index=0
     echo "Checking Podman machines for minimum requirements (Memory ≥ ${MIN_MEM_MB}MB, CPUs ≥ ${MIN_CPU})..."
