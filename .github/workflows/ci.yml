@@ -33,7 +33,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Install shellcheck and yamllint (Linux)
         if: runner.os == 'Linux'
@@ -100,7 +100,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       # jq is a script dependency that the endpoints test exercises directly; install it
       # explicitly rather than relying on it being preinstalled on the runner image.
@@ -136,7 +136,7 @@ jobs:
       CHART: sumologic/sumologic
       NS: sumologic
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       # Single source of truth: source the script to reuse its pinned chart version and
       # the shared SUMO_COMMON_SET overrides, so CI validates exactly what users deploy
@@ -162,7 +162,7 @@ jobs:
       # Pin helm to the same version the script pins (HELM_VERSION), so CI renders and
       # dry-runs with exactly the helm users get from the direct-download path.
       - name: Install Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
         with:
           version: ${{ env.HELM_VERSION }}
 
@@ -230,7 +230,7 @@ jobs:
       # Pin kind + the node image to the script's KIND_VERSION / KINDEST_NODE_VERSION so
       # CI's server-side dry-run runs on exactly the Kubernetes the script ships.
       - name: Create KinD cluster
-        uses: helm/kind-action@v1
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:
           cluster_name: ci-mock
           version: ${{ env.KIND_VERSION }}

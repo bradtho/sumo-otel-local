@@ -30,9 +30,27 @@ workflow_types() {
     ' "$WF" | sort -u
 }
 
-@test "meta: PR-title workflow exists and pins the action by major version" {
+@test "meta: PR-title workflow exists and pins the action to a commit SHA" {
     [ -f "$WF" ]
-    grep -Eq 'uses:[[:space:]]*amannn/action-semantic-pull-request@v[0-9]+' "$WF"
+    # SHA-pinned (40-hex) with the human-readable version in a trailing comment, not a
+    # mutable @vN/@main tag. A moved tag can't silently change what runs in CI.
+    grep -Eq 'uses:[[:space:]]*amannn/action-semantic-pull-request@[0-9a-f]{40}[[:space:]]+#[[:space:]]*v[0-9]' "$WF"
+}
+
+@test "meta: every workflow action is pinned to a full 40-char commit SHA" {
+    # Supply-chain guard: any third-party action added later with a floating @vN/@branch
+    # tag (instead of an immutable SHA) fails here. Local reusable workflows (./...) are
+    # exempt. The trailing '# vX.Y.Z' comment is a separate token, so it's ignored.
+    local bad
+    bad=$(grep -rhoE 'uses:[[:space:]]+[^[:space:]]+' "${REPO}/.github/workflows/" \
+        | awk '{print $2}' \
+        | grep -vE '^\./' \
+        | grep -vE '@[0-9a-f]{40}$' || true)
+    if [ -n "$bad" ]; then
+        echo "These workflow actions are NOT pinned to a 40-char commit SHA:" >&2
+        echo "$bad" >&2
+    fi
+    [ -z "$bad" ]
 }
 
 @test "meta: workflow allowed-types match CONTRIBUTING.md exactly (no drift)" {

@@ -115,3 +115,18 @@ example values. To bump it:
    for instance, removed the `kube-prometheus-stack.*.enabled` toggles).
 4. Open the change as a `fix:`/`feat:` PR if it affects what users deploy; CI must be
    green (it validates the new pinned version) before merge.
+
+## GitHub Actions are pinned to commit SHAs
+
+Every third-party action in `.github/workflows/` is pinned to a full 40-character
+commit SHA with the human-readable version in a trailing comment, e.g.
+
+```yaml
+- uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+```
+
+A floating `@v5`/`@main` tag is mutable — whoever can move the tag can change what runs
+in CI (including the privileged `release-please` job). The SHA can't. **Don't "simplify"
+a pin back to a tag**: `tests/meta.bats` fails if any workflow action isn't SHA-pinned.
+Renovate (`renovate.json`, `github-actions` manager) keeps the SHAs current and updates
+the version comment, so bumps still arrive as reviewable PRs.
