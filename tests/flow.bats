@@ -899,6 +899,28 @@ CHART_STUB='helm(){ printf "%s\n" "NAME CHART_VERSION APP_VERSION DESC" "sumolog
     [ -z "$output" ] # no node image emitted -> caller uses kind's default
 }
 
+@test "select_node_image: offline manual entry rejects a non-semver tag, then accepts a valid one" {
+    # curl fails -> the offline fallback loop. Feed a bad tag (rejected + re-prompt) then a
+    # valid one. 2>&1 so $output has both the stderr rejection and the stdout ref.
+    run bash -c 'source "$1"; trap - ERR EXIT
+        curl(){ return 1; }
+        select_node_image <<<"latest
+v1.32.2" 2>&1' _ "$SCRIPT"
+    [[ "$output" == *"Invalid tag 'latest'"* ]] && [[ "$output" == *"kindest/node:v1.32.2"* ]]
+}
+
+@test "select_node_image: menu manual entry rejects a non-semver tag, then accepts a valid one" {
+    # curl returns a 1-tag list -> manual option is 2. Select 2, enter a bad tag (rejected,
+    # re-show menu), select 2 again, enter a valid tag.
+    run bash -c 'source "$1"; trap - ERR EXIT
+        curl(){ printf "%s" "{\"results\":[{\"name\":\"v1.32.2\"}]}"; }
+        select_node_image <<<"2
+evil:tag@sha256:x
+2
+v1.40.0" 2>&1' _ "$SCRIPT"
+    [[ "$output" == *"Invalid tag 'evil:tag@sha256:x'"* ]] && [[ "$output" == *"kindest/node:v1.40.0"* ]]
+}
+
 # --- install_dependencies (direct-download path uses a private scratch dir) --
 
 @test "install_dependencies: direct path downloads into a mktemp scratch dir, never /tmp, and cleans up" {
@@ -987,4 +1009,17 @@ CHART_STUB='helm(){ printf "%s\n" "NAME CHART_VERSION APP_VERSION DESC" "sumolog
     ' _ "$SCRIPT" "$BATS_TEST_TMPDIR/scratch" "$CALLS"
     # All three guards fire on the macOS no-runtime path (chained -> each load-bearing on macOS bats).
     assert_called "^require_cmd curl$" && assert_called "^require_cmd tar$" && assert_called "^require_cmd unzip$"
+}
+
+@test "install_dependencies: with Homebrew present, installs via brew and skips the direct path" {
+    # Guards the install-strategy selection (brew present -> install_with_brew + early return,
+    # never the direct-download path). docker/podman both absent -> brew also gets podman.
+    run bash -c 'source "$1"; trap - ERR EXIT
+        command(){ if [ "$1" = "-v" ]; then
+            case "$2" in brew) return 0;; docker|podman) return 1;; *) builtin command "$@";; esac
+          else builtin command "$@"; fi; }
+        brew(){ echo "brew $*"; }
+        curl(){ echo "CURL_RAN"; }   # the direct path curls; it must NOT run
+        install_dependencies' _ "$SCRIPT"
+    [ "$status" -eq 0 ] && [[ "$output" == *"brew install"*"kind"*"podman"* ]] && [[ "$output" != *"CURL_RAN"* ]]
 }

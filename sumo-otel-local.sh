@@ -401,6 +401,94 @@ function verify_sha256 {
 }
 
 # Check Dependencies
+# Install the required CLIs with Homebrew. Brew always installs its current formula, so
+# the KIND_VERSION/KUBECTL_VERSION/HELM_VERSION/PODMAN_VERSION pins (direct-download only)
+# don't apply here. Adds a container runtime only when neither Docker nor Podman is present.
+function install_with_brew {
+    echo "Installing Dependencies with Homebrew..."
+    local brew_pkgs=(jq kubectl helm kind)
+    if ! command -v docker &>/dev/null && ! command -v podman &>/dev/null; then
+        brew_pkgs+=(podman)
+    fi
+    brew install --quiet "${brew_pkgs[@]}"
+}
+
+# Direct binary downloads — the no-Homebrew fallback. Each CLI is pinned to its *_VERSION
+# and checksum-verified before install. Downloads into a private, unpredictable 0700
+# scratch dir (mktemp -d, not fixed /tmp paths) so a hostile pre-created file/symlink on a
+# shared host can't redirect or clobber a download; cleaned on exit (a backstop for the
+# mid-download error path) and again explicitly at the end. The caller has already run
+# `require_cmd curl` (shared with the Homebrew-installer download path).
+function install_deps_direct {
+    echo "Installing Dependencies Directly..."
+    local jq_base ver tmpdir helm_tgz
+    tmpdir=$(mktemp -d)
+    trap 'rm -rf "$tmpdir"' EXIT
+    if ! command -v jq &>/dev/null; then
+        echo "Installing jq..."
+        jq_base="https://github.com/jqlang/jq/releases/download/jq-1.7.1"
+        curl -fsSL -o "$tmpdir/jq" "${jq_base}/jq-${JQ_OS}-${ARCH}"
+        verify_sha256 "$tmpdir/jq" "$(remote_sha256 "${jq_base}/sha256sum.txt" "jq-${JQ_OS}-${ARCH}")" jq
+        install_binary "$tmpdir/jq" jq
+    fi
+
+    if ! command -v kubectl &>/dev/null; then
+        echo "Installing Kubectl ${KUBECTL_VERSION}..."
+        curl -fsSL -o "$tmpdir/kubectl" "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/${OS}/${ARCH}/kubectl"
+        verify_sha256 "$tmpdir/kubectl" "$(remote_sha256 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/${OS}/${ARCH}/kubectl.sha256")" kubectl
+        install_binary "$tmpdir/kubectl" kubectl
+        kubectl version --client
+    fi
+
+    if ! command -v helm &>/dev/null; then
+        echo "Installing Helm ${HELM_VERSION}..."
+        require_cmd tar # the pinned release tarball is extracted with tar below
+        # Download the pinned helm release tarball directly and verify its published
+        # SHA-256 before extracting — avoids executing the get-helm-3 bootstrap script
+        # from a mutable master ref. Tarball lays out as ${OS}-${ARCH}/helm.
+        helm_tgz="helm-${HELM_VERSION}-${OS}-${ARCH}.tar.gz"
+        curl -fsSL -o "$tmpdir/$helm_tgz" "https://get.helm.sh/${helm_tgz}"
+        verify_sha256 "$tmpdir/$helm_tgz" "$(remote_sha256 "https://get.helm.sh/${helm_tgz}.sha256")" helm
+        tar -xzf "$tmpdir/$helm_tgz" -C "$tmpdir"
+        install_binary "$tmpdir/${OS}-${ARCH}/helm" helm
+    fi
+
+    # Only auto-install a runtime when the user has neither Docker nor Podman.
+    if ! command -v docker &>/dev/null && ! command -v podman &>/dev/null; then
+        echo "Installing Podman ${PODMAN_VERSION}..."
+        if [[ "$OS" == "darwin" ]]; then
+            require_cmd unzip # the darwin release ships as a .zip, extracted below
+            # The release tag carries a leading 'v' (used in the URL); the zip's internal
+            # directory does not (podman-6.0.0/, not podman-v6.0.0/).
+            ver="${PODMAN_VERSION#v}"
+            curl -fsSL -o "$tmpdir/podman.zip" "https://github.com/containers/podman/releases/download/${PODMAN_VERSION}/podman-remote-release-darwin_${ARCH}.zip"
+            verify_sha256 "$tmpdir/podman.zip" "$(remote_sha256 "https://github.com/containers/podman/releases/download/${PODMAN_VERSION}/shasums" "podman-remote-release-darwin_${ARCH}.zip")" podman
+            unzip -q "$tmpdir/podman.zip" -d "$tmpdir/podman-extract"
+            install_binary "$tmpdir/podman-extract/podman-${ver}/usr/bin/podman" podman
+            install_binary "$tmpdir/podman-extract/podman-${ver}/usr/bin/podman-mac-helper" podman-mac-helper
+        else
+            # On Linux, Podman runs natively (no VM/machine) and needs rootless
+            # dependencies a single static binary can't provide. Defer to the distro
+            # package manager. See TODO.md (P1 first-class runtime task).
+            echo "On Linux, install Podman with your distribution's package manager, e.g.:"
+            echo "  sudo apt-get install -y podman   # Debian/Ubuntu"
+            echo "  sudo dnf install -y podman       # Fedora/RHEL"
+            echo "Then re-run this script."
+            exit 1
+        fi
+    fi
+
+    if ! command -v kind &>/dev/null; then
+        echo "Installing Kind ${KIND_VERSION}..."
+        curl -fsSL -o "$tmpdir/kind" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-${OS}-${ARCH}"
+        verify_sha256 "$tmpdir/kind" "$(remote_sha256 "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-${OS}-${ARCH}.sha256sum" "kind-${OS}-${ARCH}")" kind
+        install_binary "$tmpdir/kind" kind
+    fi
+
+    rm -rf "$tmpdir"
+    trap - EXIT
+}
+
 function install_dependencies {
     # --dry-run previews the install flow without side effects, so don't install anything.
     if [[ -n "$DRY_RUN" ]]; then
@@ -408,115 +496,44 @@ function install_dependencies {
         return 0
     fi
 
+    # Install-strategy selection: prefer Homebrew when present; otherwise offer to install
+    # it (then re-run), or fall back to verified direct downloads.
     if command -v brew &>/dev/null; then
-        echo "Installing Dependencies with Homebrew..."
-        # Homebrew always installs the current formula version; the KIND_VERSION /
-        # KUBECTL_VERSION / HELM_VERSION / PODMAN_VERSION pins apply only to the
-        # direct-download fallback below, so brew pinning is best-effort (none here).
-        # Only install a container runtime when the user has neither already.
-        local brew_pkgs=(jq kubectl helm kind)
-        if ! command -v docker &>/dev/null && ! command -v podman &>/dev/null; then
-            brew_pkgs+=(podman)
-        fi
-        brew install --quiet "${brew_pkgs[@]}"
-    elif ! command -v brew &>/dev/null; then
-        # Both branches below fetch over the network with curl (the Homebrew installer
-        # download, and every direct-download). Fail fast with the standard clear message
-        # if curl is missing (e.g. a minimal Linux image) instead of a raw
-        # 'curl: command not found' under the ERR trap.
-        require_cmd curl
-        if confirm "Homebrew is not installed. Install it?" n; then
-            # Run a PINNED, checksum-verified copy of the Homebrew installer rather than
-            # piping mutable HEAD straight into a shell. Surface the exact source so the
-            # user can see what will execute; verify_sha256 aborts on any mismatch.
-            local brew_tmp
-            brew_tmp=$(mktemp -d)
-            trap 'rm -rf "$brew_tmp"' EXIT
-            echo "Fetching the Homebrew installer (pinned commit ${HOMEBREW_INSTALL_COMMIT}):" >&2
-            echo "  https://github.com/Homebrew/install/blob/${HOMEBREW_INSTALL_COMMIT}/install.sh" >&2
-            curl -fsSL -o "$brew_tmp/install_homebrew.sh" "https://raw.githubusercontent.com/Homebrew/install/${HOMEBREW_INSTALL_COMMIT}/install.sh"
-            verify_sha256 "$brew_tmp/install_homebrew.sh" "$HOMEBREW_INSTALL_SHA256" "Homebrew installer"
-            chmod 700 "$brew_tmp/install_homebrew.sh"
-            "$brew_tmp/install_homebrew.sh"
-            rm -rf "$brew_tmp"
-            trap - EXIT
-            install_dependencies
-        else
-            echo "Installing Dependencies Directly..."
-            # Download into a private, unpredictable 0700 scratch dir (mktemp -d) rather
-            # than fixed /tmp paths, so a hostile pre-created file/symlink on a shared
-            # host can't redirect or clobber a download. Cleaned up on exit (a backstop
-            # for the mid-download error path) and again explicitly at the end — a later
-            # EXIT trap in the flow (e.g. install_sumo) would otherwise replace this one.
-            local jq_base ver tmpdir helm_tgz
-            tmpdir=$(mktemp -d)
-            trap 'rm -rf "$tmpdir"' EXIT
-            if ! command -v jq &>/dev/null; then
-                echo "Installing jq..."
-                jq_base="https://github.com/jqlang/jq/releases/download/jq-1.7.1"
-                curl -fsSL -o "$tmpdir/jq" "${jq_base}/jq-${JQ_OS}-${ARCH}"
-                verify_sha256 "$tmpdir/jq" "$(remote_sha256 "${jq_base}/sha256sum.txt" "jq-${JQ_OS}-${ARCH}")" jq
-                install_binary "$tmpdir/jq" jq
-            fi
-
-            if ! command -v kubectl &>/dev/null; then
-                echo "Installing Kubectl ${KUBECTL_VERSION}..."
-                curl -fsSL -o "$tmpdir/kubectl" "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/${OS}/${ARCH}/kubectl"
-                verify_sha256 "$tmpdir/kubectl" "$(remote_sha256 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/${OS}/${ARCH}/kubectl.sha256")" kubectl
-                install_binary "$tmpdir/kubectl" kubectl
-                kubectl version --client
-            fi
-
-            if ! command -v helm &>/dev/null; then
-                echo "Installing Helm ${HELM_VERSION}..."
-                require_cmd tar # the pinned release tarball is extracted with tar below
-                # Download the pinned helm release tarball directly and verify its
-                # published SHA-256 before extracting — avoids executing the get-helm-3
-                # bootstrap script from a mutable master ref. Tarball lays out as
-                # ${OS}-${ARCH}/helm.
-                helm_tgz="helm-${HELM_VERSION}-${OS}-${ARCH}.tar.gz"
-                curl -fsSL -o "$tmpdir/$helm_tgz" "https://get.helm.sh/${helm_tgz}"
-                verify_sha256 "$tmpdir/$helm_tgz" "$(remote_sha256 "https://get.helm.sh/${helm_tgz}.sha256")" helm
-                tar -xzf "$tmpdir/$helm_tgz" -C "$tmpdir"
-                install_binary "$tmpdir/${OS}-${ARCH}/helm" helm
-            fi
-
-            # Only auto-install a runtime when the user has neither Docker nor Podman.
-            if ! command -v docker &>/dev/null && ! command -v podman &>/dev/null; then
-                echo "Installing Podman ${PODMAN_VERSION}..."
-                if [[ "$OS" == "darwin" ]]; then
-                    require_cmd unzip # the darwin release ships as a .zip, extracted below
-                    # The release tag carries a leading 'v' (used in the URL); the zip's
-                    # internal directory does not (podman-6.0.0/, not podman-v6.0.0/).
-                    ver="${PODMAN_VERSION#v}"
-                    curl -fsSL -o "$tmpdir/podman.zip" "https://github.com/containers/podman/releases/download/${PODMAN_VERSION}/podman-remote-release-darwin_${ARCH}.zip"
-                    verify_sha256 "$tmpdir/podman.zip" "$(remote_sha256 "https://github.com/containers/podman/releases/download/${PODMAN_VERSION}/shasums" "podman-remote-release-darwin_${ARCH}.zip")" podman
-                    unzip -q "$tmpdir/podman.zip" -d "$tmpdir/podman-extract"
-                    install_binary "$tmpdir/podman-extract/podman-${ver}/usr/bin/podman" podman
-                    install_binary "$tmpdir/podman-extract/podman-${ver}/usr/bin/podman-mac-helper" podman-mac-helper
-                else
-                    # On Linux, Podman runs natively (no VM/machine) and needs rootless
-                    # dependencies a single static binary can't provide. Defer to the
-                    # distro package manager. See TODO.md (P1 first-class runtime task).
-                    echo "On Linux, install Podman with your distribution's package manager, e.g.:"
-                    echo "  sudo apt-get install -y podman   # Debian/Ubuntu"
-                    echo "  sudo dnf install -y podman       # Fedora/RHEL"
-                    echo "Then re-run this script."
-                    exit 1
-                fi
-            fi
-
-            if ! command -v kind &>/dev/null; then
-                echo "Installing Kind ${KIND_VERSION}..."
-                curl -fsSL -o "$tmpdir/kind" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-${OS}-${ARCH}"
-                verify_sha256 "$tmpdir/kind" "$(remote_sha256 "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-${OS}-${ARCH}.sha256sum" "kind-${OS}-${ARCH}")" kind
-                install_binary "$tmpdir/kind" kind
-            fi
-
-            rm -rf "$tmpdir"
-            trap - EXIT
-        fi
+        install_with_brew
+        return
     fi
+
+    # No Homebrew. Both branches below fetch with curl (the Homebrew-installer download,
+    # and every direct download), so fail fast with the standard clear message if curl is
+    # missing (e.g. a minimal Linux image) instead of a raw 'curl: command not found'.
+    require_cmd curl
+    if confirm "Homebrew is not installed. Install it?" n; then
+        # Run a PINNED, checksum-verified copy of the Homebrew installer rather than piping
+        # mutable HEAD straight into a shell. Surface the exact source so the user can see
+        # what will execute; verify_sha256 aborts on any mismatch.
+        local brew_tmp
+        brew_tmp=$(mktemp -d)
+        trap 'rm -rf "$brew_tmp"' EXIT
+        echo "Fetching the Homebrew installer (pinned commit ${HOMEBREW_INSTALL_COMMIT}):" >&2
+        echo "  https://github.com/Homebrew/install/blob/${HOMEBREW_INSTALL_COMMIT}/install.sh" >&2
+        curl -fsSL -o "$brew_tmp/install_homebrew.sh" "https://raw.githubusercontent.com/Homebrew/install/${HOMEBREW_INSTALL_COMMIT}/install.sh"
+        verify_sha256 "$brew_tmp/install_homebrew.sh" "$HOMEBREW_INSTALL_SHA256" "Homebrew installer"
+        chmod 700 "$brew_tmp/install_homebrew.sh"
+        "$brew_tmp/install_homebrew.sh"
+        rm -rf "$brew_tmp"
+        trap - EXIT
+        install_dependencies
+    else
+        install_deps_direct
+    fi
+}
+
+# True if $1 is a valid kindest/node version tag (vMAJOR.MINOR.PATCH) — the same shape
+# the auto-list is filtered to. Manual input is validated against this before it's
+# interpolated into the `kind create --image kindest/node:<tag>` ref, so an arbitrary
+# string can't redirect kind to an unintended image/tag/digest.
+function valid_node_tag {
+    [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
 }
 
 # Prompt for a kindest/node image and echo the chosen ref (e.g.
@@ -537,9 +554,16 @@ function select_node_image {
 
     if [[ ${#tags[@]} -eq 0 ]]; then
         echo "Could not fetch a tag list (offline or API change)." >&2
-        read -rp "Enter a kindest/node version tag (e.g. v1.32.2), blank for kind's default: " manual || manual=""
-        [[ -n "$manual" ]] && printf 'kindest/node:%s' "$manual"
-        return 0
+        while true; do
+            read -rp "Enter a kindest/node version tag (e.g. v1.32.2), blank for kind's default: " manual || manual=""
+            if [[ -z "$manual" ]]; then
+                return 0 # blank / EOF -> use kind's built-in default (no output)
+            elif valid_node_tag "$manual"; then
+                printf 'kindest/node:%s' "$manual"
+                return 0
+            fi
+            echo "Invalid tag '${manual}': expected vMAJOR.MINOR.PATCH (e.g. v1.32.2)." >&2
+        done
     fi
 
     echo "Available kindest/node versions:" >&2
@@ -563,11 +587,15 @@ function select_node_image {
                 echo "No input (stdin closed); using kind's default Kubernetes version." >&2
                 return 0
             fi
-            [[ -n "$manual" ]] && {
+            if [[ -z "$manual" ]]; then
+                continue # blank -> re-show the menu
+            elif valid_node_tag "$manual"; then
                 printf 'kindest/node:%s' "$manual"
                 return 0
-            }
-            continue
+            else
+                echo "Invalid tag '${manual}': expected vMAJOR.MINOR.PATCH (e.g. v1.32.2)." >&2
+                continue
+            fi
         fi
         if [[ "$selection" -ge 1 && "$selection" -le ${#tags[@]} ]]; then
             printf 'kindest/node:%s' "${tags[$((selection - 1))]}"
