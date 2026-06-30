@@ -792,16 +792,13 @@ function new_podman {
     run_cmd podman machine start "${NAME}"
 }
 
-function use_existing_podman {
-    # Minimum requirements come from MIN_MEM_MB / MIN_CPU (set/overridable above).
-    # Scope every working variable to the function — these were previously unscoped
-    # and leaked into the global environment. `local -a` localizes arrays in Bash 3.2
-    # exactly as `local` does scalars (verified on 3.2.57), so no `declare`/global
-    # workaround is needed.
+# Populate the caller's valid_* arrays with the Podman machines that meet the minimum
+# Memory/CPU requirements (MIN_MEM_MB / MIN_CPU, overridable above), printing the
+# discovered list as it goes. The four arrays are read from the CALLER's scope via Bash
+# dynamic scoping — use_existing_podman declares them `local -a`, so they stay
+# function-scoped (no global leak, verified on 3.2.57) while this helper fills them.
+function list_valid_machines {
     local machines_json index machine_count i name mem_raw cpu status mem_mb
-    local display_number create_option exit_option selection selection_index
-    local chosen_machine machine_running
-    local -a valid_names valid_memories valid_cpus valid_statuses
 
     # Get list of all machines with their specs
     machines_json=$(podman machine list --format json)
@@ -831,18 +828,20 @@ function use_existing_podman {
         fi
     done
 
-    # Check if any valid machine was found
-    if [[ ${#valid_names[@]} -eq 0 ]]; then
-        echo "No Podman machines meet the minimum requirements (≥ ${MIN_MEM_MB}MB RAM, ≥ ${MIN_CPU} CPUs)."
-        if confirm "Create a new Podman machine with the correct specs?" n; then
-            # new_podman stops any running machine before starting the new one.
-            new_podman || return 1
-            return 0
-        else
-            echo "No machine selected and creation declined."
-            return 1
-        fi
-    fi
+    # Explicit success: as the function tail, the loop's own status is data-dependent — a
+    # final `((index++))` post-incrementing 0 (a single qualifying machine) returns 1, and an
+    # unqualified last machine leaves the `if`-test's status. Neither should be our exit code.
+    return 0
+}
+
+# Drive the interactive menu over the caller's valid_* arrays (populated by
+# list_valid_machines, read here via dynamic scoping): pick a machine, create a new one,
+# or exit; start the chosen machine if it isn't running. Returns 0 on a usable machine,
+# non-zero on cancel/EOF. Assumes the caller has already confirmed at least one valid
+# machine exists.
+function prompt_machine_selection {
+    local i display_number create_option exit_option selection selection_index
+    local chosen_machine machine_running
 
     # Prompt in a loop until valid input
     while true; do
@@ -887,7 +886,7 @@ function use_existing_podman {
         # Convert to 0-based index and validate
         selection_index=$((selection - 1))
         if [[ "$selection_index" -lt 0 || "$selection_index" -ge ${#valid_names[@]} ]]; then
-            echo "Invalid selection: please enter a number from 1 and $exit_option."
+            echo "Invalid selection: please enter a number between 1 and $exit_option."
             continue
         fi
 
@@ -913,6 +912,33 @@ function use_existing_podman {
     done
 
     return 0
+}
+
+# Reuse an existing Podman machine that meets the minimums, or offer to create one.
+# Orchestrates list_valid_machines (discover/filter) + prompt_machine_selection (menu).
+function use_existing_podman {
+    # Declare the valid_* arrays here (function-local, so nothing leaks to the global
+    # environment) and share them by dynamic scope with the two helpers: list_valid_machines
+    # fills them, prompt_machine_selection reads them. `local -a` localizes arrays in Bash
+    # 3.2 just as `local` does scalars (verified on 3.2.57).
+    local -a valid_names valid_memories valid_cpus valid_statuses
+
+    list_valid_machines
+
+    # No machine met the minimums: offer to create one, else bail.
+    if [[ ${#valid_names[@]} -eq 0 ]]; then
+        echo "No Podman machines meet the minimum requirements (≥ ${MIN_MEM_MB}MB RAM, ≥ ${MIN_CPU} CPUs)."
+        if confirm "Create a new Podman machine with the correct specs?" n; then
+            # new_podman stops any running machine before starting the new one.
+            new_podman || return 1
+            return 0
+        else
+            echo "No machine selected and creation declined."
+            return 1
+        fi
+    fi
+
+    prompt_machine_selection
 }
 
 # True if a KinD cluster with the given name already exists (for the current provider).

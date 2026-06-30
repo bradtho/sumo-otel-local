@@ -711,6 +711,109 @@ run_status() {
     [[ "$output" != *"LEAKED: "* ]]  # ...with nothing after the colon -> no leaked vars
 }
 
+# --- list_valid_machines / prompt_machine_selection (the split helpers) ------
+# use_existing_podman was split into list_valid_machines (discover+filter, fills the
+# caller's valid_* arrays) and prompt_machine_selection (menu over those arrays). The
+# arrays stay `local -a` in use_existing_podman and are shared with the helpers by Bash
+# dynamic scoping; these guard that contract (fill, read, and the no-valid orchestration).
+
+@test "list_valid_machines: fills the caller's valid_* arrays, filtering by the minimums" {
+    run bash -c 'source "$1"
+        MIN_MEM_MB=2048; MIN_CPU=1
+        podman(){ printf "%s" "[{\"Name\":\"big\",\"Memory\":21474836480,\"CPUs\":8,\"Running\":true},{\"Name\":\"tiny\",\"Memory\":1073741824,\"CPUs\":1,\"Running\":false}]"; }
+        wrap(){ local -a valid_names valid_memories valid_cpus valid_statuses
+            list_valid_machines >/dev/null     # discovered list is irrelevant here
+            printf "NAMES=[%s] MEM=[%s] CPU=[%s] STAT=[%s] N=%s" \
+                "${valid_names[*]}" "${valid_memories[*]}" "${valid_cpus[*]}" "${valid_statuses[*]}" "${#valid_names[@]}"; }
+        wrap' _ "$SCRIPT"
+    # "big" (20480MB/8cpu) qualifies; "tiny" (1024MB) is filtered out -> exactly one entry.
+    [[ "$output" == *"NAMES=[big] MEM=[20480] CPU=[8] STAT=[true] N=1"* ]]
+}
+
+@test "prompt_machine_selection: reads the caller's arrays and starts a non-running pick" {
+    run bash -c 'source "$1"
+        confirm(){ return 0; }                 # yes, start it
+        podman(){ echo "podman $*"; }
+        wrap(){ local -a valid_names=("m1") valid_memories=("8192") valid_cpus=("4") valid_statuses=("false")
+            ASSUME_YES=yes                      # auto-selects machine #1
+            prompt_machine_selection; }
+        wrap' _ "$SCRIPT"
+    [ "$status" -eq 0 ] && [[ "$output" == *"You selected: m1"* ]] && [[ "$output" == *"podman machine start m1"* ]]
+}
+
+@test "use_existing_podman: no qualifying machine + declined creation returns non-zero" {
+    run bash -c 'source "$1"
+        MIN_MEM_MB=999999; MIN_CPU=1           # nothing can qualify
+        podman(){ printf "%s" "[{\"Name\":\"tiny\",\"Memory\":1073741824,\"CPUs\":1,\"Running\":false}]"; }
+        confirm(){ return 1; }                  # decline creating a new machine
+        use_existing_podman' _ "$SCRIPT"
+    # The no-valid branch reads the (empty) dynamic-scoped array and bails cleanly.
+    [[ "$output" == *"No Podman machines meet the minimum"* ]] && [ "$status" -ne 0 ]
+}
+
+@test "list_valid_machines: returns 0 when exactly one machine qualifies (rc not data-dependent)" {
+    # Regression guard: the loop's trailing `((index++))` post-incrementing 0 must not become
+    # the helper's exit status (it returns 1), which would abort use_existing_podman under
+    # set -e on the common single-machine case. An explicit `return 0` fixes it.
+    run bash -c 'source "$1"
+        MIN_MEM_MB=2048; MIN_CPU=1
+        podman(){ printf "%s" "[{\"Name\":\"only\",\"Memory\":21474836480,\"CPUs\":8,\"Running\":true}]"; }
+        wrap(){ local -a valid_names valid_memories valid_cpus valid_statuses
+            list_valid_machines >/dev/null; printf "RC=[%s] N=[%s]" "$?" "${#valid_names[@]}"; }
+        wrap' _ "$SCRIPT"
+    [[ "$output" == *"RC=[0] N=[1]"* ]] # found the one machine AND returned success
+}
+
+# prompt_machine_selection menu branches (all driven with ASSUME_YES='' over a 1-element
+# array, so create_option=2 / exit_option=3). Each asserts a single combined last command
+# so every check is load-bearing on macOS bats.
+
+@test "prompt_machine_selection: EOF on the menu read aborts with a clear message" {
+    run bash -c 'source "$1"
+        wrap(){ local -a valid_names=("m1") valid_memories=("8192") valid_cpus=("4") valid_statuses=("true")
+            ASSUME_YES=""; prompt_machine_selection </dev/null; }
+        wrap' _ "$SCRIPT"
+    [[ "$output" == *"aborting machine selection"* ]] && [ "$status" -ne 0 ]
+}
+
+@test "prompt_machine_selection: choosing 'None (exit)' returns non-zero without selecting" {
+    run bash -c 'source "$1"
+        wrap(){ local -a valid_names=("m1") valid_memories=("8192") valid_cpus=("4") valid_statuses=("true")
+            ASSUME_YES=""; prompt_machine_selection <<<"3"; }
+        wrap' _ "$SCRIPT"
+    [[ "$output" == *"Exiting without selecting a Podman machine"* ]] && [ "$status" -ne 0 ]
+}
+
+@test "prompt_machine_selection: choosing 'Create a new Podman machine' calls new_podman" {
+    run bash -c 'source "$1"
+        new_podman(){ echo "NEW_PODMAN_RAN"; return 0; }
+        wrap(){ local -a valid_names=("m1") valid_memories=("8192") valid_cpus=("4") valid_statuses=("true")
+            ASSUME_YES=""; prompt_machine_selection <<<"2"; }
+        wrap' _ "$SCRIPT"
+    [ "$status" -eq 0 ] && [[ "$output" == *"NEW_PODMAN_RAN"* ]]
+}
+
+@test "prompt_machine_selection: non-numeric then out-of-range input re-prompts, then selects" {
+    run bash -c 'source "$1"
+        confirm(){ return 0; }; podman(){ echo "podman $*"; }
+        wrap(){ local -a valid_names=("m1") valid_memories=("8192") valid_cpus=("4") valid_statuses=("true")
+            ASSUME_YES=""; prompt_machine_selection <<<"abc
+9
+1"; }
+        wrap' _ "$SCRIPT"
+    [[ "$output" == *"Invalid input"* ]] && [[ "$output" == *"Invalid selection"* ]] && [ "$status" -eq 0 ]
+}
+
+@test "prompt_machine_selection: declining 'Start it now?' on a stopped machine returns non-zero" {
+    run bash -c 'source "$1"
+        confirm(){ return 1; }                  # decline starting
+        podman(){ echo "podman $*"; }
+        wrap(){ local -a valid_names=("m1") valid_memories=("8192") valid_cpus=("4") valid_statuses=("false")
+            ASSUME_YES=yes; prompt_machine_selection; }
+        wrap' _ "$SCRIPT"
+    [[ "$output" == *"Exiting without starting machine"* ]] && [[ "$output" != *"podman machine start"* ]] && [ "$status" -ne 0 ]
+}
+
 # --- select_chart_version ---------------------------------------------------
 
 # helm stub emitting a `helm search repo --versions` style table (with an unrelated
