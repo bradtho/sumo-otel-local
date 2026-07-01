@@ -53,6 +53,93 @@ _All resolved — see [Done › LOW severity](#low-severity-complete)._
 
 ---
 
+## Distribution — install as a PATH command ("run like a binary")
+
+> **Open decision (2026-07-02).** How to let users invoke `sumo-otel-local` from
+> anywhere on `$PATH` (e.g. in `/usr/local/bin`) instead of `./sumo-otel-local.sh` from
+> a clone. Produced by a multi-agent design workflow; the risky mechanics were **tested
+> empirically on this macOS box** (Bash 3.2.57, macOS 26.5). No approach chosen yet —
+> this records the decision tree so it can be picked up later.
+
+**The blocker (confirmed empirically).** `SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")"
+&& pwd)` at `sumo-otel-local.sh:72` does **not** resolve symlinks. So a naive
+`ln -s <clone>/sumo-otel-local.sh /usr/local/bin/sumo-otel-local` **breaks asset lookup**:
+`SCRIPT_DIR` becomes the symlink's dir (`/usr/local/bin`), the required `kind-config.yaml`
+isn't found, and `init_cluster` (`sumo-otel-local.sh:1141-1146`) hard-errors `exit 1` — so
+`-i`/`-n` are dead through a bare symlink. Every option below has to solve exactly this.
+
+**Runtime asset inventory (what must travel with the script).**
+
+| Asset | Required? | Why |
+| --- | --- | --- |
+| `kind-config.yaml` | **Yes — only hard dep** | `init_cluster` `exit 1`s if missing (`:1141-1146`); passed to every `kind create` |
+| `values.yaml` (`DEFAULT_HELM_VALUES`, `:235`) | No | convenience default in `prompt_values_file`; skipped if absent |
+| `.sumo-otel-local.env.example` | No | only for `--init-config`; hard-errors only on that path |
+| `$SUMO_CONFIG_FILE` (`./.sumo-otel-local.env`) | No | **CWD-relative, not `SCRIPT_DIR`** — unaffected by where the script lives |
+| `examples/*`, `manifests/metrics_auth.yaml` | **No** | never read at runtime — only named in help/echo text; user applies them by hand |
+
+So only **one small file** (~505 B) is strictly required; `values.yaml` + `.env.example`
+should ship alongside so the install-time default and `--init-config` keep working.
+`examples/`/`manifests/` do **not** need bundling.
+
+**Decision tree — four viable approaches.**
+
+| # | Approach | Effort | End-user UX | Relocatable? | Ongoing cost |
+| - | -------- | ------ | ----------- | ------------ | ------------ |
+| 1 | **Symlink + symlink-safe `SCRIPT_DIR`** | small | `git clone` once, `ln -s` onto PATH; `git pull` to update | No (clone must stay) | none |
+| 2 | **Prefix install** (`install.sh` / `make install`) | small | script→`lib/`, assets→`share/`, launcher→`bin/`; sudo or `~/.local` | No (re-install to update) | keep installer in sync |
+| 3 | **Homebrew tap** | medium | `brew install bradtho/tap/sumo-otel-local` (+`upgrade`/`uninstall`) | via brew | 2nd repo `bradtho/homebrew-tap` + per-release formula bump |
+| 4 | **Embed assets → single file** | medium | `cp` to `/usr/bin`, or `curl \| bash` | **Yes — true drop-in** | build step + CI sync gate + release upload |
+
+- **#1 — symlink-safe `SCRIPT_DIR`.** Replace the line-72 idiom with a portable
+  canonicalize loop (`while [ -h ]` + `cd -P` + bare `readlink`; **not** `readlink -f` —
+  it works on modern macOS but isn't portable to older BSD `readlink`, and CLAUDE.md
+  mandates 3.2). Verified on this box against absolute/relative/chained symlinks, spaced
+  paths, and the sourced/bats path (loop is a no-op when not a symlink, so bats is
+  unaffected). ~13-line function + a regression test + README steps. Tool stays
+  clone-based. Prerequisite that also makes #2/#3 cleaner.
+- **#2 — prefix install.** One-line, backward-compatible edit at `:72`
+  (`SCRIPT_DIR="${SUMO_OTEL_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"`; no-op
+  when unset, so clone + bats unaffected) + an `install.sh`/`Makefile` that copies
+  script→`$PREFIX/lib`, assets→`$PREFIX/share`, and writes a launcher→`$PREFIX/bin` that
+  exports `SUMO_OTEL_HOME`. Ancestor-writability probe → sudo only when needed; clean
+  uninstall. **Use a launcher, not a bare symlink** (the symlink would reintroduce the
+  `:72` bug). No network download → no checksum concern.
+- **#3 — Homebrew tap.** Best macOS/Linuxbrew UX and lowest per-user friction; reuses the
+  existing release-please `sumo-otel-local-vX.Y.Z` tags + GitHub's auto-generated source
+  tarball (verified: 200 / `x-gzip`, contains all three assets), and `brew` verifies the
+  `sha256` fail-closed for free. Formula does `bin.install` the script + `libexec.install`
+  the assets, and the same `SUMO_OTEL_HOME`/libexec env override points the script at
+  `libexec`. `depends_on`: `kind`, `helm`, `kubernetes-cli` (**not** `kubectl`), `jq`;
+  Docker/Podman left to the script's own detection. Needs a `bradtho/homebrew-tap` repo
+  and a per-release bump (automatable from the release tag via a small workflow + PAT).
+  macOS/Linuxbrew only — doesn't serve apt/yum/curl-pipe Linux users.
+- **#4 — embed assets (truest "binary").** A `build/bundle.sh` inlines the three assets
+  (~3 KB total) as **quoted** heredocs (`<<'EOF'` — load-bearing: `kind-config.yaml`
+  contains `${CLUSTER_NAME}` and backticks that an unquoted heredoc would mangle; verified
+  byte-for-byte round-trip under 3.2) into a generated single file that materialises them
+  to a `mktemp -d` at runtime, repoints `SCRIPT_DIR`, and cleans up. Cleanup must **not**
+  use an `EXIT` trap (the script reuses that slot in `install_dependencies`/`install_sumo`
+  /`output`) — wrap `main` in a subshell + unconditional `rm -rf`, cover INT/TERM. Ship as
+  a checksummed release artifact + a fail-closed `curl | bash` `install.sh`; keep the repo
+  multi-file for dev with a CI `git diff --exit-code` sync gate so an un-rebundled asset
+  edit fails CI. Then `cp` to `/usr/bin`, symlink, or `curl | bash` all just work.
+
+**Recommendation.** For this tool (macOS-first, already brew-centric for its own deps,
+live GitHub releases): **#3 Homebrew tap** is the most idiomatic — first-class
+`install`/`upgrade`/`uninstall`, checksum for free, reuses the release pipeline with a
+one-line script change. If the priority is a _literal_ copy-to-`/usr/bin` binary or
+non-brew Linux reach, **#4 embed** is the truest answer. The tiny `SCRIPT_DIR` env-override
+edit is the shared foundation for #1/#2/#3 and is worth doing first regardless.
+
+**Constraints any implementation must honor.** Bash 3.2 (no `readlink -f`, no assoc
+arrays); the source-without-side-effects contract (`main` guarded by `BASH_SOURCE == $0`)
+— a PATH wrapper must `exec`, not source; any download checksum-verified fail-closed
+(matches `verify_sha256`); `FORCE`/credentials never settable via env or config; keep the
+one hard asset (`kind-config.yaml`) resolvable however the tool is invoked.
+
+---
+
 ## P3 — Decision: Bash → Python migration
 
 > **Resolved 2026-06-25 (see Decisions):** stay in Bash and harden; revisit **Python**
