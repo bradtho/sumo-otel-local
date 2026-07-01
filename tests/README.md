@@ -72,4 +72,10 @@ or remove a prompt and it fails. Update that test deliberately when you change a
   Sourcing the script would clobber bats-core's builtin and red the whole suite.
 - **Prove a new test is load-bearing** by mutating the script (a throwaway copy, or append
   a function redefinition) and confirming the test *fails*. CI is the backstop, but a test
-  that can't fail is worthless.
+  that can't fail is worthless. When combining several checks into one final `[[ A && B ]]`
+  (for macOS), mutation-check *each* clause — it's easy to leave a clause non-load-bearing.
+- **`install_sumo` now does a credential pre-flight check (`curl` to the Sumo API).** Tests
+  that exercise `install_sumo` but don't care about it set `SUMO_SKIP_CRED_CHECK=1` (skips
+  the network) or stub `curl(){ …; printf <code>; }`. Endpoint/validation tests stub `curl`
+  to a chosen HTTP status; creds go via curl's stdin config, so assert they're absent from a
+  recorded `curl` argv, not present in stdin.

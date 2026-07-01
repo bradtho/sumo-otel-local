@@ -121,6 +121,27 @@ fi
 # renovate: datasource=helm depName=sumologic registryUrl=https://sumologic.github.io/sumologic-kubernetes-collection
 SUMO_CHART_VERSION="${SUMO_CHART_VERSION:-5.2.0}"
 
+# Sumo Logic deployment endpoint. Sumo orgs live in regional deployments, each with its own
+# API host; the chart's setup job authenticates against ONE of them and a blank endpoint
+# defaults to us1 — so a non-us1 org gets HTTP 401 ("Credential could not be verified") even
+# with valid creds. May be preset (env/config) as a region code (e.g. SUMOLOGIC_ENDPOINT=us2)
+# or a full API URL (https://api.us2.sumologic.com/api/v1); blank prompts then auto-detects.
+SUMOLOGIC_ENDPOINT="${SUMOLOGIC_ENDPOINT:-}"
+
+# Known Sumo deployments (region codes), probed in order during endpoint auto-detection.
+# ref: https://help.sumologic.com/docs/api/getting-started/#sumo-logic-endpoints-by-deployment-and-firewall-security
+SUMO_REGIONS="us1 us2 au ca de eu fed in jp kr"
+
+# Skip the pre-flight credential check (offline/air-gapped, or the API is firewalled). The
+# chart's setup job still validates server-side. Any non-empty value skips. Not security-
+# sensitive (it only forgoes an early check), so it is read from the environment.
+SUMO_SKIP_CRED_CHECK="${SUMO_SKIP_CRED_CHECK:-}"
+
+# helm --wait timeout for the collector pods. Overridable so a slow image pull doesn't force
+# the default (and a bad-cred setup job no longer silently blocks for the full window — the
+# pre-flight check catches it first).
+HELM_WAIT_TIMEOUT="${HELM_WAIT_TIMEOUT:-10m}"
+
 # Pinned versions for the CLIs the direct-download path installs (the no-Homebrew
 # fallback). Each is env-overridable (e.g. KIND_VERSION=v0.30.0) and tracked by
 # Renovate via the annotations below. Pinning replaces the old "latest"/"stable"
@@ -1215,6 +1236,181 @@ function secret_delete {
     esac
 }
 
+# True if $1 is one of the known Sumo deployment region codes (SUMO_REGIONS). Gates an
+# explicitly-supplied region so an alphanumeric typo (e.g. "us22") isn't turned into a
+# garbage endpoint that later 401s and hangs `helm --wait` — an unknown code falls back to
+# auto-detection instead.
+function is_known_region {
+    case " $SUMO_REGIONS " in
+        *" $1 "*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# True if $1 is free of control characters (newline, CR, tab, ...). A Sumo Access ID/Key is
+# a clean token; a stray control char (e.g. a multi-line value pasted into the keychain or
+# an env var) would break OUT of the `curl -K -` config line — injecting arbitrary curl
+# options (url/output/proxy) — and out of the values-file YAML scalar. Rejecting them up
+# front keeps yaml_escape (which handles only \ and ") sufficient for both sinks.
+function credential_is_clean {
+    case "$1" in
+        *[[:cntrl:]]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+# Map a Sumo region code OR URL to the API base URL the setup job needs (SUMOLOGIC_BASE_URL
+# / sumologic.endpoint), e.g. us2 -> https://api.us2.sumologic.com/api/v1. A value already
+# starting with http(s):// is trusted as-is; us1 is the one deployment with no region infix;
+# empty in -> empty out. Region codes are case-normalized.
+function sumo_region_to_endpoint {
+    local v=$1
+    case "$v" in
+        "") return 0 ;;
+        http://* | https://*)
+            printf '%s' "$v"
+            return 0
+            ;;
+    esac
+    v=$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')
+    if [[ "$v" == "us1" ]]; then
+        printf 'https://api.sumologic.com/api/v1'
+    else
+        printf 'https://api.%s.sumologic.com/api/v1' "$v"
+    fi
+}
+
+# Offline (no-network) endpoint resolution for the `output` render and install `--dry-run`
+# preview: a full URL or a KNOWN region maps to its URL; an unknown/typo'd region maps to
+# EMPTY — so the preview matches what the live install resolves (which discards an unknown
+# region and auto-detects / leaves the endpoint blank). Never probes or touches credentials.
+function endpoint_for_input {
+    local v=$1
+    case "$v" in
+        "") return 0 ;;
+        http://* | https://*)
+            printf '%s' "$v"
+            return 0
+            ;;
+    esac
+    v=$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')
+    is_known_region "$v" && sumo_region_to_endpoint "$v"
+    return 0
+}
+
+# Probe one Sumo API base URL with the credentials and print the HTTP status (000 if the
+# host is unreachable). Credentials go via a stdin curl config (`-K -`), NEVER on argv, so
+# they can't leak into the process list (ps); callers MUST pre-reject control-char creds
+# (credential_is_clean) so a newline can't inject extra curl config lines. The pipeline is
+# errexit-exempt (`|| true`) so a curl transport failure can't trip the ERR trap inside this
+# capture. --connect-timeout bounds the unreachable case so auto-detect can't stall for long.
+function sumo_api_status {
+    local base=$1 id=$2 key=$3 code
+    code=$(printf 'user = "%s:%s"\n' "$(yaml_escape "$id")" "$(yaml_escape "$key")" |
+        curl -K - -s -o /dev/null --connect-timeout 5 --max-time 10 -w '%{http_code}' "${base}/collectors?limit=1" 2>/dev/null || true)
+    printf '%s' "${code:-000}"
+}
+
+# Resolve the Sumo API endpoint for the given creds and pre-flight-validate them, so a bad
+# credential/region fails fast HERE instead of wedging `helm --wait` on a CrashLooping setup
+# job for the full timeout (the live-test symptom). Sets RESOLVED_ENDPOINT (the caller's
+# local, via dynamic scope) to the working API base URL — empty means "leave the chart's
+# endpoint unset / auto-discovery". UI goes to stderr. Returns 1 ONLY when the API
+# definitively REJECTS the credentials (HTTP 401), so the caller can abort. MUST be called
+# directly (not via $(...)): a non-zero return inside a command substitution would trip the
+# ERR trap in that subshell (see secret_get). $1=id $2=key $3=user-supplied region/URL.
+function resolve_sumo_endpoint {
+    local id=$1 key=$2 want=$3 base code region saw_reject="" saw_unreachable=""
+    RESOLVED_ENDPOINT=""
+
+    # A bare region typo (not a URL, not a valid code) shouldn't build a garbage URL — fall
+    # back to auto-detection instead.
+    if [[ -n "$want" ]]; then
+        case "$want" in
+            http://* | https://*) ;;
+            *)
+                want=$(printf '%s' "$want" | tr '[:upper:]' '[:lower:]')
+                if ! is_known_region "$want"; then
+                    echo "Unrecognized Sumo region '${want}'; auto-detecting instead." >&2
+                    want=""
+                fi
+                ;;
+        esac
+    fi
+
+    if [[ -n "$SUMO_SKIP_CRED_CHECK" ]]; then
+        RESOLVED_ENDPOINT=$(sumo_region_to_endpoint "$want")
+        if [[ -n "$RESOLVED_ENDPOINT" ]]; then
+            echo "Skipping credential pre-flight check (SUMO_SKIP_CRED_CHECK); using endpoint ${RESOLVED_ENDPOINT}." >&2
+        else
+            echo "Skipping credential pre-flight check (SUMO_SKIP_CRED_CHECK); leaving the endpoint to chart auto-discovery." >&2
+        fi
+        return 0
+    fi
+
+    if ! command -v curl >/dev/null 2>&1; then
+        RESOLVED_ENDPOINT=$(sumo_region_to_endpoint "$want")
+        echo "curl not found; skipping the credential pre-flight check." >&2
+        return 0
+    fi
+
+    if [[ -n "$want" ]]; then
+        base=$(sumo_region_to_endpoint "$want")
+        case "$base" in
+            http://*) echo "Warning: '${base}' is http:// — credentials will be sent unencrypted." >&2 ;;
+        esac
+        echo "Verifying Sumo credentials against ${base}..." >&2
+        code=$(sumo_api_status "$base" "$id" "$key")
+        case "$code" in
+            200 | 403) # 403 = authenticated but limited role: the endpoint/region is right
+                echo "Credentials verified (${base})." >&2
+                RESOLVED_ENDPOINT=$base
+                return 0
+                ;;
+            401)
+                echo "Credentials REJECTED by ${base} (HTTP 401)." >&2
+                return 1
+                ;;
+            *) # a KNOWN region unreachable from here (e.g. firewall): pin it (the cluster may
+                # still reach it) but note we couldn't verify. Not a typo — is_known_region gated it.
+                echo "Could not reach ${base} to verify (HTTP ${code}); proceeding without the pre-flight check." >&2
+                RESOLVED_ENDPOINT=$base
+                return 0
+                ;;
+        esac
+    fi
+
+    echo "Auto-detecting your Sumo deployment (probing regional API endpoints)..." >&2
+    for region in $SUMO_REGIONS; do
+        base=$(sumo_region_to_endpoint "$region")
+        code=$(sumo_api_status "$base" "$id" "$key")
+        case "$code" in
+            200 | 403)
+                echo "Detected Sumo deployment: ${region} (${base})." >&2
+                RESOLVED_ENDPOINT=$base
+                return 0
+                ;;
+            401) saw_reject=yes ;;
+            *) saw_unreachable=yes ;; # 000/5xx: no definitive answer from this region
+        esac
+    done
+
+    # Abort ONLY when every region answered and all rejected (creds are provably bad). If any
+    # region was unreachable (e.g. a firewall allows us1 but blocks the home region), a lone
+    # 401 isn't proof the creds are globally bad — proceed and let the chart resolve.
+    if [[ -n "$saw_reject" && -z "$saw_unreachable" ]]; then
+        echo "Credentials REJECTED by all Sumo deployments (HTTP 401)." >&2
+        return 1
+    fi
+    if [[ -n "$saw_reject" ]]; then
+        echo "Some Sumo deployments rejected these credentials and others were unreachable; cannot confirm your region." >&2
+        echo "Proceeding; set SUMOLOGIC_ENDPOINT to your region to be explicit if the install fails." >&2
+    else
+        echo "Could not reach any Sumo API endpoint to verify (network/firewall?); proceeding and letting the chart resolve the endpoint." >&2
+    fi
+    return 0
+}
+
 function install_sumo {
     require_cmd helm
 
@@ -1247,6 +1443,16 @@ function install_sumo {
         secret_set sumologic_access_key "$ACCESS_KEY"
     fi
 
+    # Reject credentials carrying control characters (newline/tab/…). A clean Sumo token never
+    # has them; a stray one (a multi-line value pasted into the keychain or an env var) would
+    # break out of the curl -K - config line and the values-file YAML scalar. Rejecting here
+    # keeps yaml_escape (only \ and ") sufficient downstream.
+    if ! credential_is_clean "$ACCESS_ID" || ! credential_is_clean "$ACCESS_KEY"; then
+        echo "Error: the Sumo Access ID/Key contain control characters (a stray newline/tab?)." >&2
+        echo "Re-enter them without embedded whitespace, or fix SUMOLOGIC_ACCESS_ID/KEY or the stored secret." >&2
+        exit 1
+    fi
+
     echo "A Helm values file is optional; the chart can install with --set values alone."
     echo "Example values live in the examples folder, e.g. examples/metrics_interval.yaml"
     HELM_VALUES=$(prompt_values_file) || exit 1
@@ -1270,6 +1476,39 @@ function install_sumo {
     chart_version=$(select_chart_version)
     echo "Using sumologic/sumologic chart version: ${chart_version}"
 
+    # Resolve the Sumo deployment endpoint and pre-flight-validate the credentials. A wrong
+    # region or bad key makes the chart's setup job fail 401 ("Credential could not be
+    # verified"), and `helm --wait` then blocks on that CrashLooping pod for the whole
+    # timeout — so catch it here and bail with guidance instead.
+    local endpoint_input RESOLVED_ENDPOINT=""
+    if [[ -n "$SUMOLOGIC_ENDPOINT" ]]; then
+        endpoint_input="$SUMOLOGIC_ENDPOINT" # preset (env/config): no prompt
+    else
+        endpoint_input=$(ask "Sumo deployment region (e.g. us2, au) or full API URL [blank=auto-detect]: " "")
+    fi
+    if [[ -n "$DRY_RUN" ]]; then
+        # Preview only: map a given region/URL to the endpoint (unknown region -> blank, as
+        # the live path resolves it), but make NO network call.
+        RESOLVED_ENDPOINT=$(endpoint_for_input "$endpoint_input")
+    elif ! resolve_sumo_endpoint "$ACCESS_ID" "$ACCESS_KEY" "$endpoint_input"; then
+        echo "" >&2
+        echo "Aborting before install: the Sumo API rejected these credentials (HTTP 401)." >&2
+        echo "  - Check the Access ID/Key are correct and belong to this Sumo org." >&2
+        echo "  - If your org is in a specific deployment, set it: SUMOLOGIC_ENDPOINT=us2 (or au, eu, ...)." >&2
+        echo "  - To bypass this pre-flight check (offline/firewalled API): SUMO_SKIP_CRED_CHECK=1." >&2
+        # Offer to drop the rejected creds so the next run re-prompts instead of reusing them.
+        if [[ -z "$ASSUME_YES" ]] && confirm "Remove the stored Sumo credentials so the next run re-prompts?" n; then
+            secret_delete sumologic_access_id || true
+            secret_delete sumologic_access_key || true
+            if [[ "$SECRET_BACKEND" == "env" ]]; then
+                echo "Note: these credentials come from SUMOLOGIC_ACCESS_ID/KEY in your environment; unset or change them before re-running." >&2
+            else
+                echo "Stored credentials removed." >&2
+            fi
+        fi
+        exit 1
+    fi
+
     # Pass the credentials via a private temp values file instead of on the command
     # line, where --set-string would expose them in the process list (ps/argv).
     secrets_file=$(mktemp)
@@ -1292,6 +1531,9 @@ EOF
     [[ -n "$HELM_VALUES" ]] && helm_args+=(--values "$HELM_VALUES")
     helm_args+=(--values "$secrets_file")
     helm_args+=(--set-string "sumologic.clusterName=${CLUSTER_NAME}")
+    # Pin the resolved deployment endpoint so the setup job authenticates against the right
+    # region (not secret; shown in the previewed/verbose command). Blank => chart default.
+    [[ -n "$RESOLVED_ENDPOINT" ]] && helm_args+=(--set-string "sumologic.endpoint=${RESOLVED_ENDPOINT}")
     helm_args+=("${SUMO_COMMON_SET[@]}")
 
     # --dry-run: show the assembled command (with helm's own --dry-run appended, the
@@ -1307,7 +1549,7 @@ EOF
     # Optionally block until the collector pods are Ready (helm --wait). Default yes;
     # decline for a fire-and-forget install and check progress with -s/--status.
     if confirm "Wait for the collector pods to become ready?" y; then
-        helm_args+=(--wait --timeout 10m)
+        helm_args+=(--wait --timeout "$HELM_WAIT_TIMEOUT")
     fi
 
     # Guard the install so a failure (incl. a --wait timeout) gives an actionable hint
@@ -1430,6 +1672,13 @@ EOF
     [[ -n "$HELM_VALUES" ]] && template_args+=(--values "$HELM_VALUES")
     template_args+=(--values "$secrets_file")
     template_args+=(--set-string "sumologic.clusterName=${CLUSTER_NAME}")
+    # Reflect a preset deployment endpoint so the render matches a regional install. No
+    # prompt/validation here: `output` renders offline with placeholder creds. Uses the same
+    # offline resolver as install --dry-run (unknown region -> blank), so the render can't
+    # drift from what a live install would deploy. Blank => unset.
+    local rendered_endpoint
+    rendered_endpoint=$(endpoint_for_input "$SUMOLOGIC_ENDPOINT")
+    [[ -n "$rendered_endpoint" ]] && template_args+=(--set-string "sumologic.endpoint=${rendered_endpoint}")
     template_args+=("${SUMO_COMMON_SET[@]}")
 
     # Render atomically: write to a temp file in the SAME directory as the target (so the

@@ -166,14 +166,33 @@ The script reads a few environment variables; all are optional.
   version is echoed on install so runs are reproducible.
 - **`SUMOLOGIC_ACCESS_ID`** / **`SUMOLOGIC_ACCESS_KEY`** (default: _unset_) — your Sumo
   credentials, used when no secret backend is available (see below).
+- **`SUMOLOGIC_ENDPOINT`** (default: _unset_ → prompt, then auto-detect) — your Sumo
+  **deployment**. Accepts a region code (`us1`, `us2`, `au`, `ca`, `de`, `eu`, `fed`,
+  `in`, `jp`, `kr`) or a full API URL (`https://api.us2.sumologic.com/api/v1`). Passed to
+  the chart as `sumologic.endpoint` so the collector's setup job talks to the right region
+  — a blank endpoint defaults to `us1`, which is why a non-`us1` org otherwise gets an
+  HTTP 401. If unset, install prompts (blank auto-detects from your credentials).
+- **`SUMO_SKIP_CRED_CHECK`** (default: _unset_) — any non-empty value skips the pre-flight
+  credential check (for offline/air-gapped runs, or when the Sumo API is firewalled). The
+  chart's setup job still validates server-side.
+- **`HELM_WAIT_TIMEOUT`** (default: `10m`) — how long `helm --wait` waits for the collector
+  pods to become Ready.
 
 Example — force Docker with a smaller footprint, unattended:
 
 ```bash
 CONTAINER_RUNTIME=docker MIN_MEM_MB=8192 MIN_CPU=2 \
-  SUMOLOGIC_ACCESS_ID=xxxx SUMOLOGIC_ACCESS_KEY=yyyy \
+  SUMOLOGIC_ACCESS_ID=xxxx SUMOLOGIC_ACCESS_KEY=yyyy SUMOLOGIC_ENDPOINT=us2 \
   ./sumo-otel-local.sh -y -i
 ```
+
+> **Credential pre-flight check.** Before installing, the script verifies your Access
+> ID/Key against the Sumo API and resolves your deployment endpoint (from
+> `SUMOLOGIC_ENDPOINT`, or by auto-detecting across regions). If the API rejects the
+> credentials it stops immediately with guidance — rather than letting the chart's setup
+> job fail `401` and `helm --wait` block until it times out. Credentials are sent via
+> curl's stdin config, never on the command line. Skip the check with
+> `SUMO_SKIP_CRED_CHECK=1`.
 
 ### Pinned tool versions
 

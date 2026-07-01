@@ -105,7 +105,7 @@ setup() {
 
 @test "install_sumo: passes pinned chart version, clusterName, and shared overrides" {
     run bash -c 'source "$1"; require_cmd(){ :;}; ensure_helm_repo(){ :;}; secret_get(){ printf STORED;}
-        helm(){ printf "HELM %s\n" "$*"; }; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
+        helm(){ printf "HELM %s\n" "$*"; }; SUMO_SKIP_CRED_CHECK=1; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
     [ "$status" -eq 0 ]
     [[ "$output" == *"--version 5.2.0"* ]]
     [[ "$output" == *"sumologic.clusterName=sumo"* ]]
@@ -120,18 +120,20 @@ setup() {
     [[ "$output" == *"--kube-context kind-sumo"* && "$output" == *"values.yaml --values "* ]]
 }
 
-@test "install_sumo: interactive prompt order is stable (values -> cluster -> repo-update -> wait)" {
+@test "install_sumo: interactive prompt order is stable (values -> cluster -> repo-update -> endpoint -> wait)" {
     # Pins the confirm/ask call ORDER + COUNT so reordering, adding, or dropping a prompt is
     # caught (the testing-seam finding's option-(a) deliverable). The stubs map prompt
     # substring -> a short tag recorded to a marker FILE (survives the $(...) subshells `ask`
     # runs in); any unmapped prompt records "UNEXPECTED-…" and breaks the exact match.
+    # SUMO_SKIP_CRED_CHECK=1 keeps the endpoint step off the network; the prompt still fires.
     local rec="${BATS_TEST_TMPDIR}/prompts"
-    run bash -c 'source "$1"; rec="$2"; trap - ERR EXIT
+    run bash -c 'source "$1"; rec="$2"; trap - ERR EXIT; SUMO_SKIP_CRED_CHECK=1
         secret_get(){ printf STORED; }     # creds already stored -> no read_secret prompts
         require_values_file(){ :; }; ensure_helm_repo(){ :; }; select_chart_version(){ printf 5.2.0; }; helm(){ :; }
         ask(){ case "$1" in
-                 *"Helm values file"*)    echo values  >>"$rec";;
-                 *"Name of the cluster"*) echo cluster >>"$rec";;
+                 *"Helm values file"*)        echo values   >>"$rec";;
+                 *"Name of the cluster"*)     echo cluster  >>"$rec";;
+                 *"Sumo deployment region"*)  echo endpoint >>"$rec";;
                  *) echo "UNEXPECTED-ASK[$1]" >>"$rec";;
                esac; printf "%s" "$2"; }
         confirm(){ case "$1" in
@@ -142,8 +144,8 @@ setup() {
         install_sumo >/dev/null 2>&1; rc=$?
         paste -sd" " "$rec"        # one-line ordered signature of the prompts
         exit $rc' _ "$SCRIPT" "$rec"
-    # Exact ordered sequence (and count) of the four prompts, asserted as one last command.
-    [ "$status" -eq 0 ] && [ "$output" = "values cluster repo-update wait" ]
+    # Exact ordered sequence (and count) of the five prompts, asserted as one last command.
+    [ "$status" -eq 0 ] && [ "$output" = "values cluster repo-update endpoint wait" ]
 }
 
 @test "install_sumo: unstored credentials prompt cleanly, with no spurious exit-44 ERR-trap report" {
@@ -154,7 +156,7 @@ setup() {
         SECRET_BACKEND=keychain; security(){ return 44; }   # nothing stored
         require_cmd(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
         helm(){ :;}; secret_set(){ :;}; read_secret(){ printf DUMMY; }
-        ASSUME_YES=""; install_sumo </dev/null' _ "$SCRIPT"
+        SUMO_SKIP_CRED_CHECK=1; ASSUME_YES=""; install_sumo </dev/null' _ "$SCRIPT"
     [ "$status" -eq 0 ]
     # Combined, load-bearing last command: NO exit-44/teardown noise AND both real not-found
     # prompts still appear. Reverting secret_get re-fires the trap and trips the first half.
@@ -165,14 +167,14 @@ setup() {
 
 @test "install_sumo: credentials never appear on the helm command line" {
     run bash -c 'source "$1"; require_cmd(){ :;}; ensure_helm_repo(){ :;}; secret_get(){ printf SECRETVALUE;}
-        helm(){ printf "HELM %s\n" "$*"; }; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
+        helm(){ printf "HELM %s\n" "$*"; }; SUMO_SKIP_CRED_CHECK=1; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
     [[ "$output" != *"SECRETVALUE"* ]]
     [[ "$output" != *"accessId"* ]]
 }
 
 @test "install_sumo: on success appends --wait and prints copy-paste next steps" {
     run bash -c 'source "$1"; require_cmd(){ :;}; ensure_helm_repo(){ :;}; secret_get(){ printf STORED;}; select_chart_version(){ printf 5.2.0;}
-        helm(){ printf "HELM %s\n" "$*"; }; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
+        helm(){ printf "HELM %s\n" "$*"; }; SUMO_SKIP_CRED_CHECK=1; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
     [ "$status" -eq 0 ]
     [[ "$output" == *"--wait --timeout 10m"* ]]
     [[ "$output" == *"Next steps:"* ]]
@@ -181,7 +183,7 @@ setup() {
 
 @test "install_sumo: declining the wait omits --wait" {
     run bash -c 'source "$1"; require_cmd(){ :;}; ensure_helm_repo(){ :;}; secret_get(){ printf STORED;}; select_chart_version(){ printf 5.2.0;}
-        confirm(){ return 1; }; helm(){ printf "HELM %s\n" "$*"; }; ASSUME_YES=""; install_sumo </dev/null' _ "$SCRIPT"
+        confirm(){ return 1; }; helm(){ printf "HELM %s\n" "$*"; }; SUMO_SKIP_CRED_CHECK=1; ASSUME_YES=""; install_sumo </dev/null' _ "$SCRIPT"
     [ "$status" -eq 0 ]
     [[ "$output" != *"--wait"* ]]
 }
@@ -189,28 +191,177 @@ setup() {
 @test "install_sumo: a failed install hints at -s without tripping the ERR trap or printing next steps" {
     run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo TRAP_FIRED" ERR
         require_cmd(){ :;}; ensure_helm_repo(){ :;}; secret_get(){ printf STORED;}; select_chart_version(){ printf 5.2.0;}
-        helm(){ return 1; }; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
+        helm(){ return 1; }; SUMO_SKIP_CRED_CHECK=1; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
     [ "$status" -ne 0 ]
     [[ "$output" != *"TRAP_FIRED"* ]]
     [[ "$output" == *"did not complete"* ]]
     [[ "$output" != *"Next steps"* ]]
 }
 
+# --- Sumo endpoint resolution + credential pre-flight check -----------------
+#     (curl is stubbed to a chosen HTTP status; creds go via curl's stdin config)
+
+@test "resolve_sumo_endpoint: explicit region verifies (200), sets the endpoint, no ERR trap" {
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo TRAP_FIRED" ERR
+        curl(){ cat >/dev/null 2>&1; printf 200; }
+        rc=0; resolve_sumo_endpoint id key us2 || rc=$?
+        printf "rc=%s ep=[%s]\n" "$rc" "$RESOLVED_ENDPOINT"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"TRAP_FIRED"* && "$output" == *"rc=0 ep=[https://api.us2.sumologic.com/api/v1]"* ]]
+}
+
+@test "resolve_sumo_endpoint: a 401 returns 1 (reject) without tripping the ERR trap" {
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo TRAP_FIRED" ERR
+        curl(){ cat >/dev/null 2>&1; printf 401; }
+        rc=0; resolve_sumo_endpoint id key us2 || rc=$?
+        printf "rc=%s ep=[%s]\n" "$rc" "$RESOLVED_ENDPOINT"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"TRAP_FIRED"* && "$output" == *"rc=1 ep=[]"* ]]
+}
+
+@test "resolve_sumo_endpoint: auto-detects the deployment (us1 401, us2 200)" {
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo TRAP_FIRED" ERR
+        curl(){ cat >/dev/null 2>&1; case "$*" in *"//api.sumologic.com/"*) printf 401;; *us2*) printf 200;; *) printf 401;; esac; }
+        rc=0; resolve_sumo_endpoint id key "" || rc=$?
+        printf "rc=%s ep=[%s]\n" "$rc" "$RESOLVED_ENDPOINT"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"TRAP_FIRED"* && "$output" == *"rc=0 ep=[https://api.us2.sumologic.com/api/v1]"* ]]
+}
+
+@test "resolve_sumo_endpoint: auto-detect all-401 rejects (1); all-unreachable proceeds blank (0)" {
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo TRAP_FIRED" ERR
+        curl(){ cat >/dev/null 2>&1; printf 401; }
+        rc=0; resolve_sumo_endpoint id key "" || rc=$?; printf "reject_rc=%s\n" "$rc"
+        curl(){ return 7; }   # connection failure -> 000 for every region
+        rc=0; resolve_sumo_endpoint id key "" || rc=$?; printf "unreach_rc=%s ep=[%s]\n" "$rc" "$RESOLVED_ENDPOINT"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"TRAP_FIRED"* && "$output" == *"reject_rc=1"* && "$output" == *"unreach_rc=0 ep=[]"* ]]
+}
+
+@test "resolve_sumo_endpoint: SUMO_SKIP_CRED_CHECK skips the probe but still resolves a region" {
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo TRAP_FIRED" ERR
+        curl(){ echo CURL_CALLED; printf 200; }   # must NOT run under skip
+        SUMO_SKIP_CRED_CHECK=1
+        rc=0; resolve_sumo_endpoint id key us2 || rc=$?
+        printf "rc=%s ep=[%s]\n" "$rc" "$RESOLVED_ENDPOINT"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"CURL_CALLED"* && "$output" == *"rc=0 ep=[https://api.us2.sumologic.com/api/v1]"* ]]
+}
+
+@test "resolve_sumo_endpoint: credentials go via stdin config (present there), never on curl's argv" {
+    local argv="${BATS_TEST_TMPDIR}/curlargv" stdin="${BATS_TEST_TMPDIR}/curlstdin"
+    run bash -c 'source "$1"; argv="$2"; stdin="$3"
+        curl(){ printf "%s\n" "$*" >>"$argv"; cat >>"$stdin"; printf 200; }
+        resolve_sumo_endpoint MYID MYKEY us2 >/dev/null 2>&1' _ "$SCRIPT" "$argv" "$stdin"
+    [ "$status" -eq 0 ]
+    # Both halves load-bearing: creds are ABSENT from argv AND actually transmitted via the
+    # stdin config (so a "drop the creds entirely" mutant fails, not just an off-argv check).
+    [[ "$(cat "$argv")" != *"MYID"* && "$(cat "$stdin")" == *"MYID:MYKEY"* ]]
+}
+
+@test "resolve_sumo_endpoint: an unknown/typo region auto-detects instead of pinning a garbage URL" {
+    # Regression for the 'us22' typo that would otherwise build api.us22... , 000, and get
+    # pinned -> reintroducing the helm --wait hang. It must fall back to auto-detect.
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo TRAP_FIRED" ERR
+        curl(){ cat >/dev/null 2>&1; case "$*" in *"api.us2.sumologic"*) printf 200;; *) printf 401;; esac; }
+        rc=0; resolve_sumo_endpoint id key us22 || rc=$?
+        printf "rc=%s ep=[%s]\n" "$rc" "$RESOLVED_ENDPOINT"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"TRAP_FIRED"* && "$output" == *"Unrecognized Sumo region 'us22'"* \
+        && "$output" == *"rc=0 ep=[https://api.us2.sumologic.com/api/v1]"* ]]
+}
+
+@test "resolve_sumo_endpoint: a 403 (authenticated, limited role) is accepted like 200" {
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo TRAP_FIRED" ERR
+        curl(){ cat >/dev/null 2>&1; printf 403; }
+        rc=0; resolve_sumo_endpoint id key us2 || rc=$?
+        printf "rc=%s ep=[%s]\n" "$rc" "$RESOLVED_ENDPOINT"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    # Combined: 403 must resolve the endpoint (rc 0) AND print "verified", so narrowing the
+    # 200|403 arm to just 200 (which falls to the *) 'could not reach' branch) fails this.
+    [[ "$output" != *"TRAP_FIRED"* && "$output" == *"Credentials verified"* \
+        && "$output" == *"rc=0 ep=[https://api.us2.sumologic.com/api/v1]"* ]]
+}
+
+@test "resolve_sumo_endpoint: partial firewall (one region 401, rest unreachable) proceeds, does NOT abort" {
+    # A valid user whose home region is firewalled but us1 is reachable+401 must not be
+    # wrongly rejected. Only an ALL-reachable-401 result is a definitive rejection.
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo TRAP_FIRED" ERR
+        curl(){ cat >/dev/null 2>&1; case "$*" in *"//api.sumologic.com/"*) printf 401;; *) return 7;; esac; }
+        rc=0; resolve_sumo_endpoint id key "" || rc=$?
+        printf "rc=%s ep=[%s]\n" "$rc" "$RESOLVED_ENDPOINT"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"TRAP_FIRED"* && "$output" == *"cannot confirm your region"* && "$output" == *"rc=0 ep=[]"* ]]
+}
+
+@test "resolve_sumo_endpoint: an http:// endpoint warns about unencrypted credentials" {
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo TRAP_FIRED" ERR
+        curl(){ cat >/dev/null 2>&1; printf 200; }
+        rc=0; resolve_sumo_endpoint id key http://api.local/api/v1 || rc=$?
+        printf "rc=%s\n" "$rc"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"TRAP_FIRED"* && "$output" == *"http:// — credentials will be sent unencrypted"* && "$output" == *"rc=0"* ]]
+}
+
+@test "install_sumo: rejects a credential containing a control character (blocks curl-config injection)" {
+    # A newline in a stored/env credential would break out of the curl -K - config line and
+    # inject curl options; install must refuse BEFORE any curl/helm runs.
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "on_error \${LINENO}" ERR
+        require_cmd(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
+        secret_get(){ case "$1" in *_id) printf "GOODID";; *_key) printf "x\nurl http://evil/";; esac; }
+        curl(){ echo CURL_RAN; printf 200; }; helm(){ echo HELM_RAN; }
+        SUMOLOGIC_ENDPOINT=us2; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
+    [ "$status" -ne 0 ]
+    # Aborts with the control-char error and NEVER reaches curl or helm (combined, last).
+    [[ "$output" == *"control characters"* && "$output" != *"CURL_RAN"* && "$output" != *"HELM_RAN"* ]]
+}
+
+@test "install_sumo: a 401 from the API aborts BEFORE helm, with region/skip guidance" {
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "on_error \${LINENO}" ERR
+        require_cmd(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}; secret_get(){ printf STORED;}
+        curl(){ cat >/dev/null 2>&1; printf 401; }; helm(){ echo HELM_CALLED; }
+        SUMOLOGIC_ENDPOINT=us2; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
+    [ "$status" -ne 0 ]
+    # Combined load-bearing: clear rejection + the SUMO_SKIP_CRED_CHECK escape hint AND helm
+    # was never reached (so the run can't hang on `helm --wait`).
+    [[ "$output" == *"rejected these credentials"* && "$output" == *"SUMO_SKIP_CRED_CHECK"* && "$output" != *"HELM_CALLED"* ]]
+}
+
+@test "install_sumo: a verified endpoint reaches helm as sumologic.endpoint; creds stay off argv" {
+    local argv="${BATS_TEST_TMPDIR}/curlargv2"
+    run bash -c 'source "$1"; argv="$2"
+        require_cmd(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}; secret_get(){ printf STORED;}
+        curl(){ printf "%s\n" "$*" >>"$argv"; cat >/dev/null 2>&1; printf 200; }
+        helm(){ printf "HELM %s\n" "$*"; }
+        SUMOLOGIC_ENDPOINT=au; HELM_WAIT_TIMEOUT=2m; ASSUME_YES=yes; install_sumo' _ "$SCRIPT" "$argv"
+    [ "$status" -eq 0 ]
+    # One combined final command so ALL three are load-bearing on macOS bats (last-command
+    # only): the resolved endpoint reaches helm, the wait timeout is the overridable value,
+    # and the access id/key never landed on curl's argv (they went through `curl -K -`).
+    [[ "$output" == *"sumologic.endpoint=https://api.au.sumologic.com/api/v1"* \
+        && "$output" == *"--timeout 2m"* \
+        && "$(cat "$argv")" != *"STORED"* ]]
+}
+
 # --- --dry-run / --verbose (install flow) -----------------------------------
 
-@test "install_sumo --dry-run: previews the helm command and installs nothing" {
+@test "install_sumo --dry-run: previews the helm command, installs nothing, and makes NO network call" {
+    # curl is stubbed to RECORD invocation so the "dry-run makes no network call" contract is
+    # load-bearing: if the DRY_RUN guard regressed, resolve_sumo_endpoint would probe the real
+    # Sumo API (up to 10 regions) — this test would both catch it AND never hit the network.
     run bash -c 'source "$1"; require_cmd(){ :;}; ensure_helm_repo(){ :;}; secret_get(){ printf S;}; select_chart_version(){ printf 5.2.0;}
-        helm(){ echo HELM_RAN; }; DRY_RUN=yes; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
+        curl(){ echo CURL_CALLED; printf 000; }; helm(){ echo HELM_RAN; }; DRY_RUN=yes; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
     [ "$status" -eq 0 ]
     [[ "$output" == *"[dry-run] would run: helm upgrade --install"* ]]
-    [[ "$output" == *"--dry-run"* ]]  # helm's own dry-run appended to the previewed command
-    [[ "$output" != *"Next steps"* ]] # success path skipped
-    [[ "$output" != *"HELM_RAN"* ]]   # real helm never executed (asserted last)
+    [[ "$output" == *"--dry-run"* ]] # helm's own dry-run appended to the previewed command
+    # Combined final command (load-bearing on macOS): dry-run skipped the success path, never
+    # executed real helm, AND never invoked curl (no pre-flight network call).
+    [[ "$output" != *"Next steps"* && "$output" != *"HELM_RAN"* && "$output" != *"CURL_CALLED"* ]]
 }
 
 @test "install_sumo --verbose: echoes the helm command before running it" {
     run bash -c 'source "$1"; require_cmd(){ :;}; ensure_helm_repo(){ :;}; secret_get(){ printf S;}; select_chart_version(){ printf 5.2.0;}
-        helm(){ echo HELM_RAN; }; VERBOSE=yes; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
+        helm(){ echo HELM_RAN; }; SUMO_SKIP_CRED_CHECK=1; VERBOSE=yes; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
     [ "$status" -eq 0 ]
     [[ "$output" == *"+ helm upgrade --install"* ]] # echoed
     [[ "$output" == *"HELM_RAN"* ]]                 # and actually run
@@ -505,6 +656,26 @@ setup() {
     # Final, combined assertion so BOTH halves are load-bearing on macOS bats: the resolved
     # values file reaches the template argv ahead of secrets, AND creds never appear on argv.
     [[ "$output" == *"values.yaml --values "* && "$output" != *"PLACEHOLDER_ACCESS"* ]]
+}
+
+@test "output: reflects a known SUMOLOGIC_ENDPOINT but drops an unknown region (no install/output drift)" {
+    # output must resolve the endpoint the SAME offline way install --dry-run does: a known
+    # region -> sumologic.endpoint; an unknown/typo region -> omitted (matching install, which
+    # discards it and auto-detects). Renders offline with placeholder creds — no network.
+    local cap="${BATS_TEST_TMPDIR}/hargs" kfile="${BATS_TEST_TMPDIR}/o.yaml"
+    run bash -c 'source "$1"; cap="$2"; kfile="$3"
+        require_cmd(){ :;}; require_values_file(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
+        ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *cluster*) printf sumo;; *) printf "";; esac; }
+        tee(){ cat >/dev/null;}; helm(){ printf "%s\n" "$*" >>"$cap"; }
+        SUMOLOGIC_ENDPOINT=au ASSUME_YES=yes output
+        printf "\n----\n" >>"$cap"
+        SUMOLOGIC_ENDPOINT=us22 ASSUME_YES=yes output' _ "$SCRIPT" "$cap" "$kfile"
+    [ "$status" -eq 0 ]
+    # Known "au" render carries the endpoint; unknown "us22" render carries none (blank),
+    # matching what a live install resolves for the same env.
+    local known unknown
+    known=$(sed -n '1,/^----$/p' "$cap"); unknown=$(sed -n '/^----$/,$p' "$cap")
+    [[ "$known" == *"sumologic.endpoint=https://api.au.sumologic.com/api/v1"* && "$unknown" != *"sumologic.endpoint="* ]]
 }
 
 # --- prompt_values_file (shared helper for install_sumo + output) -----------

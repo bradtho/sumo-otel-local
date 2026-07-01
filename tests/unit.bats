@@ -174,6 +174,59 @@ setup() {
     [ "$output" = "sumo" ]
 }
 
+# --- Sumo endpoint/region helpers -------------------------------------------
+
+@test "sumo_region_to_endpoint: maps region codes (case-insensitive) and passes URLs through" {
+    run bash -c 'source "$1"
+        printf "[%s][%s][%s][%s][%s]" \
+          "$(sumo_region_to_endpoint us1)" \
+          "$(sumo_region_to_endpoint us2)" \
+          "$(sumo_region_to_endpoint AU)" \
+          "$(sumo_region_to_endpoint "")" \
+          "$(sumo_region_to_endpoint https://api.x.test/api/v1)"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ "$output" = "[https://api.sumologic.com/api/v1][https://api.us2.sumologic.com/api/v1][https://api.au.sumologic.com/api/v1][][https://api.x.test/api/v1]" ]
+}
+
+@test "is_known_region: accepts the documented deployments, rejects typos/junk" {
+    run bash -c 'source "$1"
+        for ok in us1 us2 au ca de eu fed in jp kr; do is_known_region "$ok" || { echo "BAD-REJECT $ok"; exit 1; }; done
+        for bad in "" us22 eu2 US2 "a b" a-b; do is_known_region "$bad" && { echo "BAD-ACCEPT [$bad]"; exit 1; }; done
+        echo OK' _ "$SCRIPT"
+    [ "$status" -eq 0 ] && [ "$output" = "OK" ]
+}
+
+@test "endpoint_for_input: URL/known-region map, unknown region -> blank (matches live resolve)" {
+    run bash -c 'source "$1"
+        printf "[%s][%s][%s][%s]" \
+          "$(endpoint_for_input us2)" \
+          "$(endpoint_for_input US2)" \
+          "$(endpoint_for_input us22)" \
+          "$(endpoint_for_input https://api.x.test/api/v1)"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    # us2 -> URL; US2 (case) -> URL; us22 (unknown typo) -> BLANK; explicit URL -> passthrough.
+    [ "$output" = "[https://api.us2.sumologic.com/api/v1][https://api.us2.sumologic.com/api/v1][][https://api.x.test/api/v1]" ]
+}
+
+@test "credential_is_clean: accepts clean tokens, rejects control chars (newline/tab)" {
+    run bash -c 'source "$1"
+        credential_is_clean "su123ABCxyz" || { echo "BAD-REJECT clean"; exit 1; }
+        for bad in "$(printf "a\nb")" "$(printf "a\tb")" "$(printf "a\rb")"; do
+            credential_is_clean "$bad" && { echo "BAD-ACCEPT ctrl"; exit 1; }; done
+        echo OK' _ "$SCRIPT"
+    [ "$status" -eq 0 ] && [ "$output" = "OK" ]
+}
+
+@test "Sumo endpoint/wait constants: sane defaults, env-overridable" {
+    # Both halves folded into one final command so each is load-bearing on macOS bats
+    # (which only fails a test on its LAST command).
+    run bash -c 'source "$1"; printf "%s|%s|%s" "$SUMOLOGIC_ENDPOINT" "$SUMO_SKIP_CRED_CHECK" "$HELM_WAIT_TIMEOUT"' _ "$SCRIPT"
+    local def="$output"
+    SUMOLOGIC_ENDPOINT=us2 SUMO_SKIP_CRED_CHECK=1 HELM_WAIT_TIMEOUT=3m \
+        run bash -c 'source "$1"; printf "%s|%s|%s" "$SUMOLOGIC_ENDPOINT" "$SUMO_SKIP_CRED_CHECK" "$HELM_WAIT_TIMEOUT"' _ "$SCRIPT"
+    [[ "$def" == "||10m" && "$output" == "us2|1|3m" ]]
+}
+
 # --- MIN_* validation (top-level guard) -------------------------------------
 
 @test "MIN_MEM_MB validation: non-integer aborts sourcing" {
