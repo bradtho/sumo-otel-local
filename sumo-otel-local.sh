@@ -1933,7 +1933,7 @@ function banner {
    ___                    ___ _____ ___ _
   / __|_  _ _ __  ___    / _ \_   _| __| |
   \__ \ || | '  \/ _ \  | (_) || | | _|| |__
-  |___/\_,_|_|_|_\___/   \___/  |_| |___|____|
+  |___/\_,_|_|_|_\___/   \___/ |_| |___|____|
 EOF
     printf '%s  local KinD cluster + Sumo Logic OpenTelemetry collector  ·  v%s%s\n\n' \
         "${C_RESET}${C_DIM}" "${VERSION}" "${C_RESET}" >&2
