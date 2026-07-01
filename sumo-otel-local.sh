@@ -82,12 +82,13 @@ fi
 # here, before the config file) — piped/redirected/CI output, and the captured output the
 # test suite asserts on, stay plain (no escape codes leak in). UI goes to stderr, so the gate
 # is on fd 2. Defined before the config load so the loader's own warnings can use them. Bash
-# 3.2: plain string vars, not an associative array.
+# 3.2: plain string vars, not an associative array. NB: cyan/yellow wash out to near-white
+# when combined with bold on many themes, so bold is paired only with blue/green/red/magenta.
 if [[ -t 2 && -z "${NO_COLOR:-}" ]]; then
     C_RESET=$'\033[0m' C_BOLD=$'\033[1m' C_DIM=$'\033[2m'
-    C_RED=$'\033[31m' C_GREEN=$'\033[32m' C_YELLOW=$'\033[33m' C_CYAN=$'\033[36m'
+    C_RED=$'\033[31m' C_GREEN=$'\033[32m' C_YELLOW=$'\033[33m' C_BLUE=$'\033[34m' C_MAGENTA=$'\033[35m'
 else
-    C_RESET="" C_BOLD="" C_DIM="" C_RED="" C_GREEN="" C_YELLOW="" C_CYAN=""
+    C_RESET="" C_BOLD="" C_DIM="" C_RED="" C_GREEN="" C_YELLOW="" C_BLUE="" C_MAGENTA=""
 fi
 
 # Optional project-local config for repeatable runs. A shell snippet of KEY=value lines
@@ -273,7 +274,7 @@ function confirm {
     fi
     # On EOF/closed stdin (e.g. piped input with no -y) fall back to the default with a
     # clear note, rather than letting the unguarded read fail and abort via the ERR trap.
-    if ! read -rp "${C_BOLD}${C_CYAN}${prompt} ${hint}${C_RESET} " reply; then
+    if ! read -rp "${C_BOLD}${C_BLUE}${prompt} ${hint}${C_RESET} " reply; then
         echo "No input (stdin closed); using default '${default}'. Pass -y to run unattended." >&2
         reply=$default
     fi
@@ -292,7 +293,7 @@ function ask {
     # On EOF/closed stdin (e.g. piped input with no -y) fall back to the default with a
     # note on stderr, rather than letting the unguarded read fail and abort via the ERR
     # trap (ask is captured with $(...), so the note must not go to stdout).
-    if ! read -rp "${C_BOLD}${C_CYAN}${prompt}${C_RESET}" reply; then
+    if ! read -rp "${C_BOLD}${C_BLUE}${prompt}${C_RESET}" reply; then
         echo "No input (stdin closed); using default '${default}'. Pass -y to run unattended." >&2
     fi
     printf '%s' "${reply:-$default}"
@@ -306,7 +307,7 @@ function ask {
 function read_secret {
     local prompt=$1 value
     while true; do
-        if ! read -rsp "${C_BOLD}${C_CYAN}${prompt}${C_RESET}" value; then
+        if ! read -rsp "${C_BOLD}${C_BLUE}${prompt}${C_RESET}" value; then
             echo "" >&2
             echo "No input (stdin closed); aborting." >&2
             return 1
@@ -641,7 +642,7 @@ function select_node_image {
     if [[ ${#tags[@]} -eq 0 ]]; then
         echo "Could not fetch a tag list (offline or API change)." >&2
         while true; do
-            read -rp "Enter a kindest/node version tag (e.g. v1.32.2), blank for kind's default: " manual || manual=""
+            read -rp "${C_BOLD}${C_BLUE}Enter a kindest/node version tag (e.g. v1.32.2), blank for kind's default: ${C_RESET}" manual || manual=""
             if [[ -z "$manual" ]]; then
                 return 0 # blank / EOF -> use kind's built-in default (no output)
             elif valid_node_tag "$manual"; then
@@ -660,7 +661,7 @@ function select_node_image {
     printf "%3d. %s\n" "$manual_option" "Enter a tag manually" >&2
 
     while true; do
-        if ! read -rp "Select a version [1-${manual_option}]: " selection; then
+        if ! read -rp "${C_BOLD}${C_BLUE}Select a version [1-${manual_option}]: ${C_RESET}" selection; then
             echo "No input (stdin closed); using kind's default Kubernetes version." >&2
             return 0
         fi
@@ -669,7 +670,7 @@ function select_node_image {
             continue
         fi
         if [[ "$selection" -eq "$manual_option" ]]; then
-            if ! read -rp "Enter a kindest/node version tag (e.g. v1.32.2): " manual; then
+            if ! read -rp "${C_BOLD}${C_BLUE}Enter a kindest/node version tag (e.g. v1.32.2): ${C_RESET}" manual; then
                 echo "No input (stdin closed); using kind's default Kubernetes version." >&2
                 return 0
             fi
@@ -723,7 +724,7 @@ function select_chart_version {
     printf "%3d. %s\n" "$manual_option" "Enter a version manually" >&2
 
     while true; do
-        if ! read -rp "Select a version [1-${manual_option}, blank=${default}]: " selection; then
+        if ! read -rp "${C_BOLD}${C_BLUE}Select a version [1-${manual_option}, blank=${default}]: ${C_RESET}" selection; then
             echo "No input (stdin closed); using the pinned default ${default}." >&2
             printf '%s' "$default"
             return 0
@@ -737,7 +738,7 @@ function select_chart_version {
             continue
         fi
         if [[ "$selection" -eq "$manual_option" ]]; then
-            if ! read -rp "Enter a chart version (e.g. 5.2.0): " manual; then
+            if ! read -rp "${C_BOLD}${C_BLUE}Enter a chart version (e.g. 5.2.0): ${C_RESET}" manual; then
                 echo "No input (stdin closed); using the pinned default ${default}." >&2
                 printf '%s' "$default"
                 return 0
@@ -784,7 +785,7 @@ function select_runtime {
         fi
         echo "Both Podman and Docker are available." >&2
         while true; do
-            if ! read -rp "Which runtime should KinD use? [podman/docker] (default=podman): " choice; then
+            if ! read -rp "${C_BOLD}${C_BLUE}Which runtime should KinD use? [podman/docker] (default=podman): ${C_RESET}" choice; then
                 echo "No input (stdin closed); defaulting to podman." >&2
                 choice="podman"
             fi
@@ -990,7 +991,7 @@ function prompt_machine_selection {
 
         if [[ -n "$ASSUME_YES" ]]; then
             selection=1 # unattended: use the first machine that meets the minimums
-        elif ! read -rp "Enter your choice [1-$exit_option]: " selection; then
+        elif ! read -rp "${C_BOLD}${C_BLUE}Enter your choice [1-$exit_option]: ${C_RESET}" selection; then
             echo "No input (stdin closed); aborting machine selection." >&2
             return 1
         fi
@@ -1398,7 +1399,7 @@ function resolve_sumo_endpoint {
         code=$(sumo_api_status "$base" "$id" "$key")
         case "$code" in
             200 | 403) # 403 = authenticated but limited role: the endpoint/region is right
-                echo "${C_GREEN}Credentials verified (${base}).${C_RESET}" >&2
+                echo "${C_BOLD}${C_GREEN}Credentials verified (${base}).${C_RESET}" >&2
                 RESOLVED_ENDPOINT=$base
                 return 0
                 ;;
@@ -1923,7 +1924,7 @@ function on_error {
 # pollutes captured stdout or non-interactive/CI output. Purely cosmetic.
 function banner {
     [[ -t 2 ]] || return 0
-    printf '%s\n' "${C_CYAN}${C_BOLD}" >&2
+    printf '%s\n' "${C_BOLD}${C_MAGENTA}" >&2
     cat >&2 <<'EOF'
    ___                    ___ _____ ___ _
   / __|_  _ _ __  ___    / _ \_   _| __| |
@@ -2021,7 +2022,7 @@ function write_config_from_template {
     # A per-user config that may end up holding credentials should not be world-readable;
     # match the chmod-600 convention used for the temp values file.
     chmod 600 "$SUMO_CONFIG_FILE" 2>/dev/null || true
-    echo "${C_GREEN}Created ${SUMO_CONFIG_FILE} from the template.${C_RESET}" >&2
+    echo "${C_BOLD}${C_GREEN}Created ${SUMO_CONFIG_FILE} from the template.${C_RESET}" >&2
     echo "Edit it (e.g. uncomment 'SUMOLOGIC_ENDPOINT=us2'), then re-run to apply." >&2
 }
 

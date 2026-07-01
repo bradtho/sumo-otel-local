@@ -139,8 +139,8 @@ setup() {
 # --- Terminal UI: colours + launch banner (both TTY-gated) ------------------
 
 @test "colours: empty when stderr is not a TTY (keeps piped/CI/captured output plain)" {
-    run bash -c 'source "$1"; printf "[%s][%s][%s]" "$C_CYAN" "$C_RED" "$C_RESET"' _ "$SCRIPT"
-    [ "$output" = "[][][]" ]
+    run bash -c 'source "$1"; printf "[%s][%s][%s][%s]" "$C_BLUE" "$C_GREEN" "$C_RED" "$C_RESET"' _ "$SCRIPT"
+    [ "$output" = "[][][][]" ]
 }
 
 @test "banner: prints nothing when stderr is not a TTY (never pollutes captured output)" {
