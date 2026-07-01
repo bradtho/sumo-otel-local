@@ -829,7 +829,11 @@ function set_kind_provider {
 # Best-effort resource check for Docker, mirroring the Podman machine minimums.
 function check_docker_resources {
     local info ncpu mem_bytes mem_mb
-    info=$(docker info --format '{{.NCPU}} {{.MemTotal}}' 2>/dev/null) || return 0
+    # `|| true` INSIDE the $() (not `$(…) || return 0`): under `set -E` a `docker info` failure
+    # inside the subshell fires the inherited ERR trap there, defeating this best-effort skip
+    # (the outer `|| return 0` can't reach into the subshell). Empty output => can't probe => skip.
+    info=$(docker info --format '{{.NCPU}} {{.MemTotal}}' 2>/dev/null || true)
+    [[ -n "$info" ]] || return 0
     ncpu=${info%% *}
     mem_bytes=${info##* }
     [[ "$ncpu" =~ ^[0-9]+$ && "$mem_bytes" =~ ^[0-9]+$ ]] || return 0
@@ -1734,9 +1738,11 @@ EOF
     # render_tmp is intentionally NOT local: the EXIT trap runs in the global scope, where
     # function-locals are invisible (an empty "$render_tmp" would skip the cleanup and leak
     # the temp on failure). secrets_file is global for the same reason.
-    # The mktemp runs in an `if` (errexit-exempt) so a failure reports its own clear line
-    # rather than the generic ERR-trap message.
-    if ! render_tmp=$(mktemp "${out_dir}/.sumo-render.XXXXXX"); then
+    # Capture with `|| true` INSIDE the $() (a bare `if ! …=$(mktemp …)` does NOT protect it):
+    # under `set -E` the subshell inherits the ERR trap, so an mktemp failure fires the generic
+    # ERR-trap message there (on stderr) before our clear line. Empty render_tmp => mktemp failed.
+    render_tmp=$(mktemp "${out_dir}/.sumo-render.XXXXXX" 2>/dev/null || true)
+    if [[ -z "$render_tmp" ]]; then
         echo "Error: cannot create a temporary file in '${out_dir}' to render into." >&2
         exit 1
     fi
@@ -1962,7 +1968,14 @@ function endpoints {
     require_cmd kubectl jq
     local cluster_name secret_json
     cluster_name=$(ask_cluster_name "Cluster name [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
-    if ! secret_json=$(kubectl --context "kind-${cluster_name}" -n sumologic get secret sumologic -o json 2>/dev/null); then
+    # Put the graceful `|| true` INSIDE the command substitution — a bare `if ! …=$(kubectl …)`
+    # does NOT protect the kubectl call: under `set -E` the $(…) subshell inherits the ERR trap,
+    # so a kubectl failure fires on_error *inside the subshell* (the outer `if !` only exempts the
+    # assignment in this shell), printing a spurious "command failed / nothing changed" line —
+    # on stderr, so `2>/dev/null` can't hide it — before our own message. `|| true` keeps the
+    # subshell's status 0; an unreachable cluster / missing secret yields empty output.
+    secret_json=$(kubectl --context "kind-${cluster_name}" -n sumologic get secret sumologic -o json 2>/dev/null || true)
+    if [[ -z "$secret_json" ]]; then
         echo "Error: could not read the 'sumologic' secret (cluster unreachable, or the collector isn't installed)." >&2
         exit 1
     fi

@@ -663,7 +663,9 @@ setup() {
 
 @test "output: a temp-file creation failure reports clearly, not via the ERR trap" {
     local kfile="${BATS_TEST_TMPDIR}/out.yaml"
-    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo ERR_TRAP" ERR; kfile="$2"
+    # STDERR trap: render_tmp=$(mktemp …) captures stdout, so a *stdout* trap would be swallowed
+    # into render_tmp and hidden — only a stderr trap (like the real on_error) surfaces the bug.
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo ERR_TRAP >&2" ERR; kfile="$2"
         require_cmd(){ :;}; require_values_file(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}
         ask(){ case "$1" in *Manifest*) printf "%s" "$kfile";; *) printf "";; esac; }
         mktemp(){ case "$*" in *sumo-render*) return 1;; *) command mktemp "$@";; esac; }
@@ -829,10 +831,17 @@ run_status() {
     [[ "$output" == *"endpoint-logs = https://logs.example"* ]] # decoded (load-bearing: asserted last)
 }
 
-@test "endpoints: errors clearly when the sumologic secret can't be read" {
-    run bash -c 'source "$1"; require_cmd(){ :;}; kubectl(){ return 1; }; ASSUME_YES=yes; endpoints' _ "$SCRIPT"
+@test "endpoints: errors clearly when the sumologic secret can't be read (no spurious ERR trap)" {
+    # STDERR trap mirrors the real on_error: inside `secret_json=$(kubectl …)` a *stdout* trap
+    # would be captured INTO secret_json and hidden, so it wouldn't catch the bug — the real
+    # on_error prints to the terminal. Under set -E the $() subshell inherits the trap, so a
+    # bare `if ! secret_json=$(kubectl …)` fires on_error in the subshell (the reported bug).
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo ERR_TRAP >&2" ERR; require_cmd(){ :;}
+        kubectl(){ return 1; }; ASSUME_YES=yes; endpoints' _ "$SCRIPT"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"could not read the 'sumologic' secret"* ]]
+    # Combined, load-bearing on macOS bats: the clear message appears AND the kubectl failure
+    # inside the $() subshell did NOT fire on_error.
+    [[ "$output" == *"could not read the 'sumologic' secret"* && "$output" != *"ERR_TRAP"* ]]
 }
 
 @test "endpoints: a non-base64 secret value fails cleanly (exit 1, no ERR trap)" {
@@ -889,6 +898,17 @@ run_status() {
     run env PATH="${BATS_TEST_TMPDIR}:$PATH" bash "$SCRIPT" -y -o </dev/null
     [ "$status" -ne 0 ]
     [[ "$output" == *"Error: command failed"* ]]
+}
+
+@test "check_docker_resources: a failing 'docker info' skips silently, no ERR trap in the subshell" {
+    # `info=$(docker info …)` runs docker in a $() subshell; under set -E a failure there would
+    # fire on_error INSIDE the subshell (stderr), defeating this best-effort probe. It must
+    # return 0 silently. STDERR trap because a stdout trap would be captured into `info` and hidden.
+    run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo ERR_TRAP >&2" ERR
+        docker(){ return 1; }; check_docker_resources; echo "RC=$?"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    # Combined load-bearing on macOS bats: returned 0 (skipped) AND no spurious trap AND no probe line.
+    [[ "$output" == *"RC=0"* && "$output" != *"ERR_TRAP"* && "$output" != *"Docker resources:"* ]]
 }
 
 # --- select_runtime ---------------------------------------------------------
