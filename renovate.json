@@ -14,9 +14,9 @@
       "groupName": "github actions"
     },
     {
-      "description": "Group the CI binary tools into one PR. NOTE: shfmt's per-asset SHA-256 digests in ci.yml are NOT auto-updated by Renovate — refresh all four in the same PR (the checksum step fails closed until you do). kubeconform fetches CHECKSUMS per-version, so it self-verifies.",
+      "description": "Group the CI lint tools into one PR. NOTE: shfmt's per-asset SHA-256 digests in ci.yml are NOT auto-updated by Renovate — refresh all four in the same PR (the checksum step fails closed until you do). kubeconform fetches CHECKSUMS per-version, so it self-verifies. markdownlint-cli2 is an npm package run via npx (no checksum step).",
       "matchManagers": ["custom.regex"],
-      "matchDepNames": ["mvdan/sh", "yannh/kubeconform"],
+      "matchDepNames": ["mvdan/sh", "yannh/kubeconform", "markdownlint-cli2"],
       "groupName": "ci tooling"
     },
     {
@@ -45,10 +45,10 @@
     },
     {
       "customType": "regex",
-      "description": "Track the shfmt and kubeconform versions pinned in the CI workflow.",
+      "description": "Track the shfmt, kubeconform, and markdownlint-cli2 versions pinned in the CI workflow. currentValue accepts an optional 'v' prefix so both github-releases (v3.13.1) and npm (0.23.0) pins match.",
       "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
       "matchStrings": [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+_VERSION=(?<currentValue>v[0-9]\\S*)"
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+_VERSION=(?<currentValue>v?[0-9]\\S*)"
       ]
     }
   ]

@@ -88,9 +88,12 @@ bash -n sumo-otel-local.sh                       # syntax
 shellcheck sumo-otel-local.sh                     # lint (must be clean)
 shfmt -d -i 4 -ci sumo-otel-local.sh              # format (4-space indent, switch-case indent)
 yamllint -c .yamllint.yml kind-config.yaml values.yaml examples/*.yaml
+npx markdownlint-cli2 "**/*.md" "!CHANGELOG.md"   # Markdown (config: .markdownlint.jsonc)
 ```
 
-`shfmt -w -i 4 -ci sumo-otel-local.sh` rewrites in place.
+`shfmt -w -i 4 -ci sumo-otel-local.sh` rewrites in place. markdownlint config lives in
+`.markdownlint.jsonc` (relaxed, like `.yamllint.yml`); `CHANGELOG.md` is excluded (it is
+release-please-generated). In CI, markdownlint runs once (Linux only) inside the `Lint` job.
 
 The **`mock-deploy`** CI job additionally renders the chart against every values file
 with dummy creds + `kubeconform`, then validates server-side on a KinD cluster

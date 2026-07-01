@@ -88,6 +88,19 @@ jobs:
       - name: yamllint
         run: yamllint -c .yamllint.yml kind-config.yaml values.yaml examples/*.yaml manifests/*.yaml
 
+      # markdownlint is JS-based and OS-independent, so run it once (Linux only) rather than
+      # redundantly on both matrix legs; it still gates because "Lint (ubuntu-latest)" is a
+      # required check. Rules come from .markdownlint.jsonc; CHANGELOG.md is excluded (it is
+      # release-please-generated and its duplicate headings/blank lines aren't hand-fixable —
+      # matching .markdownlintignore, which the VS Code extension honours but cli2 does not).
+      - name: markdownlint
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          # renovate: datasource=npm depName=markdownlint-cli2
+          MARKDOWNLINT_CLI2_VERSION=0.23.0
+          npx --yes "markdownlint-cli2@${MARKDOWNLINT_CLI2_VERSION}" "**/*.md" "!CHANGELOG.md"
+
   # Runs the bats-core unit/flow suite (tests/) on both OSes. The script is
   # sourceable without side effects (strict mode + traps live in main()), so the
   # tests exercise individual functions against stubbed external commands.
