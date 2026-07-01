@@ -225,11 +225,18 @@ pick another version interactively — see [Kubernetes version](#kubernetes-vers
 
 For repeatable runs, drop a **`.sumo-otel-local.env`** in your working directory and the
 script sources it on startup (it's plain shell — `KEY=value` lines, no YAML parser). It
-can set any of the knobs above (`CONTAINER_RUNTIME`, `CLUSTER_NAME`, `SUMO_CHART_VERSION`,
-`HELM_VALUES`, `MIN_MEM_MB`, `MIN_CPU`, `ASSUME_YES`) so you don't re-answer prompts.
-Copy [`.sumo-otel-local.env.example`](.sumo-otel-local.env.example) to get started; the
-real file is git-ignored. Point `SUMO_CONFIG_FILE` at another path, or `=/dev/null` to
-ignore it for a run. For safety it **cannot** enable `--force` or carry credentials.
+can set any of the knobs above — e.g. `CONTAINER_RUNTIME`, `CLUSTER_NAME`,
+`SUMO_CHART_VERSION`, `SUMOLOGIC_ENDPOINT`, `SUMO_SKIP_CRED_CHECK`, `HELM_WAIT_TIMEOUT`,
+`HELM_VALUES`, `MIN_MEM_MB`, `MIN_CPU`, `ASSUME_YES` — so you don't re-answer prompts (see
+the [example file](.sumo-otel-local.env.example) for the full set).
+
+Create it with **`./sumo-otel-local.sh --init-config`** (copies the template, won't
+overwrite an existing config), then uncomment what you need. On an interactive setup run
+(`-i`/`-n`/`-m`/`-r`) with no config present, the script also offers to create one for you.
+Point `SUMO_CONFIG_FILE` at another path, or `=/dev/null` to ignore it for a run; the real
+file is git-ignored. For safety it **cannot** enable `--force`, and the loader **warns** if
+it finds `SUMOLOGIC_ACCESS_ID`/`KEY` in it — credentials belong in secret storage or the
+environment, not a plaintext file on disk.
 
 ## Credentials & secret storage
 

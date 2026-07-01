@@ -20,6 +20,8 @@ function help {
     echo "  -p, --purge     Uninstall the cluster (and, with Podman on macOS, the Podman machine)."
     echo "  -u, --uninstall Uninstall the Cluster only."
     echo "  -v, --version   Display the version of the script."
+    echo "      --init-config  Create .sumo-otel-local.env from the bundled template, then edit it"
+    echo "                  to preset the Sumo region, cluster, chart version, etc. and skip prompts."
     echo "  -y, --yes       Run unattended: assume yes and use defaults for all prompts."
     echo "                  (also via the ASSUME_YES env var; --non-interactive is an alias)"
     echo "  -f, --force     Confirm destructive teardown (-u/-p) non-interactively."
@@ -83,11 +85,21 @@ fi
 # for credentials. Path overridable via SUMO_CONFIG_FILE.
 SUMO_CONFIG_FILE="${SUMO_CONFIG_FILE:-./.sumo-otel-local.env}"
 if [[ -f "$SUMO_CONFIG_FILE" ]]; then
-    echo "Loading config from ${SUMO_CONFIG_FILE}" >&2
-    set -a
-    # shellcheck disable=SC1090
-    . "$SUMO_CONFIG_FILE"
-    set +a
+    if [[ -r "$SUMO_CONFIG_FILE" ]]; then
+        echo "Loading config from ${SUMO_CONFIG_FILE}" >&2
+        # Discourage plaintext credentials on disk: warn if the file assigns them (the loader
+        # still sources it, but creds belong in secret storage or SUMOLOGIC_ACCESS_ID/KEY).
+        if grep -qE '^[[:space:]]*(export[[:space:]]+)?SUMOLOGIC_ACCESS_(ID|KEY)=' "$SUMO_CONFIG_FILE"; then
+            echo "Warning: ${SUMO_CONFIG_FILE} sets Sumo credentials — storing them in a plaintext" >&2
+            echo "         config on disk is discouraged; prefer secret storage or the environment." >&2
+        fi
+        set -a
+        # shellcheck disable=SC1090
+        . "$SUMO_CONFIG_FILE"
+        set +a
+    else
+        echo "Warning: config file ${SUMO_CONFIG_FILE} exists but is not readable; skipping it." >&2
+    fi
 fi
 
 # Minimum Podman machine resources, overridable via the environment.
@@ -1943,6 +1955,75 @@ function forward {
     exit 1
 }
 
+# Copy the bundled template to $SUMO_CONFIG_FILE so the user can preset knobs (region,
+# cluster, chart version) instead of re-answering prompts. The caller decides whether to
+# overwrite; this just writes and prints guidance. Returns non-zero if the template is
+# missing or the copy fails.
+# True if the project config is explicitly disabled — SUMO_CONFIG_FILE=/dev/null (the
+# documented "ignore config for this run" idiom) or empty. Neither the offer nor --init-config
+# should act on a disabled config.
+function config_disabled {
+    [[ -z "$SUMO_CONFIG_FILE" || "$SUMO_CONFIG_FILE" == "/dev/null" ]]
+}
+
+function write_config_from_template {
+    local example="$SCRIPT_DIR/.sumo-otel-local.env.example"
+    if [[ ! -f "$example" ]]; then
+        echo "Error: config template not found at '${example}'." >&2
+        echo "Run the script from its repository clone (the template ships alongside it)." >&2
+        return 1
+    fi
+    cp "$example" "$SUMO_CONFIG_FILE" || return 1
+    # A per-user config that may end up holding credentials should not be world-readable;
+    # match the chmod-600 convention used for the temp values file.
+    chmod 600 "$SUMO_CONFIG_FILE" 2>/dev/null || true
+    echo "Created ${SUMO_CONFIG_FILE} from the template." >&2
+    echo "Edit it (e.g. uncomment 'SUMOLOGIC_ENDPOINT=us2'), then re-run to apply." >&2
+}
+
+# --init-config action: scaffold the project config. Overwriting an EXISTING config is
+# treated as destructive (it holds the user's hand-edited knobs, possibly credentials): like
+# confirm_destructive, ASSUME_YES alone must NOT wipe it — require an interactive yes or the
+# explicit --force.
+function init_config {
+    if config_disabled; then
+        echo "Config is disabled (SUMO_CONFIG_FILE='${SUMO_CONFIG_FILE}'); nothing to create." >&2
+        exit 1
+    fi
+    if [[ -e "$SUMO_CONFIG_FILE" ]]; then
+        if [[ -n "$FORCE" ]]; then
+            echo "--force: overwriting existing config '${SUMO_CONFIG_FILE}'." >&2
+        elif [[ -n "$ASSUME_YES" ]]; then
+            echo "Refusing to overwrite existing config '${SUMO_CONFIG_FILE}' under -y/ASSUME_YES." >&2
+            echo "Pass --force to overwrite it, or remove it first." >&2
+            exit 1
+        elif ! confirm "Config '${SUMO_CONFIG_FILE}' already exists. Overwrite?" n; then
+            echo "Left '${SUMO_CONFIG_FILE}' unchanged." >&2
+            exit 0
+        fi
+    fi
+    write_config_from_template || exit 1
+}
+
+# On an interactive setup run (-i/-n/-m/-r) with no project config present, offer to scaffold
+# one so the user can preset the Sumo region etc. and skip prompts. On yes: create it and exit
+# so they can edit before running. On no (or EOF): continue normally. Skipped under ASSUME_YES
+# (the config is sourced at startup, so a mid-run create can't affect it), under --dry-run
+# (which must touch nothing), and when the config is explicitly disabled.
+function maybe_offer_config_init {
+    [[ -n "$ASSUME_YES" ]] && return 0       # unattended: never prompt
+    [[ -n "$DRY_RUN" ]] && return 0          # dry-run touches nothing
+    config_disabled && return 0              # config explicitly disabled (/dev/null)
+    [[ -f "$SUMO_CONFIG_FILE" ]] && return 0 # already have one (it was loaded at startup)
+    echo "No project config (${SUMO_CONFIG_FILE}) found. Creating one lets you preset the Sumo" >&2
+    echo "region (SUMOLOGIC_ENDPOINT), cluster name, chart version, etc. and skip these prompts." >&2
+    if confirm "Create ${SUMO_CONFIG_FILE} from the template now?" n; then
+        write_config_from_template || exit 1
+        exit 0
+    fi
+    echo "Continuing without one; create it anytime with '$0 --init-config'." >&2
+}
+
 # Entry point. Enabling strict mode and the ERR trap here (rather than at the top
 # level) keeps the script sourceable by the test suite without side effects.
 function main {
@@ -1990,6 +2071,7 @@ function main {
             -p | --purge) set_action purge ;;
             -u | --uninstall) set_action uninstall ;;
             -v | --version) set_action version ;;
+            --init-config) set_action init_config ;;
             # Modifiers (not actions): order-independent, may appear before or after.
             -y | --yes | --non-interactive) ASSUME_YES="yes" ;;
             -f | --force) FORCE="yes" ;;
@@ -2013,7 +2095,7 @@ function main {
     fi
 
     if [[ -n "$conflict" ]]; then
-        echo "Specify exactly one action (-i/-n/-m/-r/-o/-s/-e/--forward/-p/-u/-v)." >&2
+        echo "Specify exactly one action (-i/-n/-m/-r/-o/-s/-e/--forward/-p/-u/-v/--init-config)." >&2
         help >&2
         exit 1
     fi
@@ -2024,6 +2106,12 @@ function main {
         echo "Error: --dry-run only applies to the install flow (-i/-n/-m)." >&2
         exit 1
     fi
+
+    # On interactive setup runs with no project config, offer to scaffold one first so the
+    # user can preset the region/cluster and skip prompts (declining just continues).
+    case "$action" in
+        install | init | helm | reinstall) maybe_offer_config_init ;;
+    esac
 
     case "$action" in
         install)
@@ -2044,8 +2132,9 @@ function main {
         purge) purge ;;
         uninstall) uninstall ;;
         version) version ;;
+        init_config) init_config ;;
         *)
-            echo "Specify exactly one action (-i/-n/-m/-r/-o/-s/-e/--forward/-p/-u/-v), or -h for help." >&2
+            echo "Specify exactly one action (-i/-n/-m/-r/-o/-s/-e/--forward/-p/-u/-v/--init-config), or -h for help." >&2
             help >&2
             exit 1
             ;;
