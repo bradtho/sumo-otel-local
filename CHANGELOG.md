@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.0](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.8.0...sumo-otel-local-v0.9.0) (2026-07-01)
+
+
+### Features
+
+* **cli:** colourise purge output and drop podman's redundant re-prompt ([#32](https://github.com/bradtho/sumo-otel-local/issues/32)) ([21ef9e1](https://github.com/bradtho/sumo-otel-local/commit/21ef9e194f4cc766d7e4869b76e7b11c069392cf))
+
+
+### Bug Fixes
+
+* **cli:** stop --endpoints firing a spurious ERR trap when the secret can't be read ([#35](https://github.com/bradtho/sumo-otel-local/issues/35)) ([ee8816e](https://github.com/bradtho/sumo-otel-local/commit/ee8816ed89e48cc2749306af56fd7beb391890e5))
+
 ## [0.8.0](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.7.0...sumo-otel-local-v0.8.0) (2026-07-01)
 
 
