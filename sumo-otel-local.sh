@@ -244,6 +244,11 @@ FORCE=""
 DRY_RUN=""
 VERBOSE=""
 
+# Runtime signal (never from env/config): set once a flow has already resolved CLUSTER_NAME
+# via a prompt (init_cluster on -i/-n, reinstall on -r) so install_sumo doesn't ask for it a
+# SECOND time. A direct -m/--helm leaves it empty, so install_sumo still prompts there.
+CLUSTER_NAME_RESOLVED=""
+
 # Ask a yes/no question. $1=prompt, $2=default (y|n, default n). Returns 0 for yes.
 # In unattended mode (ASSUME_YES) it answers yes without prompting.
 function confirm {
@@ -1087,6 +1092,7 @@ function init_cluster {
     # Cluster name is asked once, regardless of the version choice. Validated so a stray
     # line can't yield a bogus kind-<junk> context (see ask_cluster_name/valid_cluster_name).
     CLUSTER_NAME=$(ask_cluster_name "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
+    CLUSTER_NAME_RESOLVED=yes # install_sumo (in the -i flow) reuses this instead of re-asking
 
     # Handle an existing cluster of the same name instead of letting kind error out.
     if cluster_exists "$CLUSTER_NAME"; then
@@ -1469,10 +1475,15 @@ function install_sumo {
     echo "Example values live in the examples folder, e.g. examples/metrics_interval.yaml"
     HELM_VALUES=$(prompt_values_file) || exit 1
 
-    # Reuse an already-resolved CLUSTER_NAME as the default (e.g. set by reinstall) so the
-    # uninstall and reinstall target the same cluster; falls back to DEFAULT_CLUSTER_NAME
-    # for a direct -m/-i where it isn't pre-set (unchanged behavior there).
-    CLUSTER_NAME=$(ask_cluster_name "Name of the cluster [default=${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}]: " "${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}")
+    # Ask for the cluster name ONLY when a caller hasn't already resolved it. On -i/-n
+    # (init_cluster) and -r (reinstall) the name was just prompted for, so re-asking here is a
+    # confusing double-prompt; reuse it. A direct -m/--helm leaves CLUSTER_NAME_RESOLVED empty,
+    # so install_sumo still prompts (defaulting to any env/config CLUSTER_NAME).
+    if [[ -n "$CLUSTER_NAME_RESOLVED" ]]; then
+        echo "Using cluster '${CLUSTER_NAME}'."
+    else
+        CLUSTER_NAME=$(ask_cluster_name "Name of the cluster [default=${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}]: " "${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}")
+    fi
 
     # Always ensure the repo is registered; the prompt only controls refreshing it.
     if confirm "Check for Helm repo updates?" n; then
@@ -1601,8 +1612,9 @@ function reinstall {
     fi
     # Resolve the cluster once and pin --kube-context so the uninstall and the reinstall
     # target the SAME cluster and neither touches a stray current context. install_sumo
-    # (called below) reuses this CLUSTER_NAME as its prompt default.
+    # (called below) reuses this CLUSTER_NAME instead of re-asking (CLUSTER_NAME_RESOLVED).
     CLUSTER_NAME=$(ask_cluster_name "Name of the cluster [default=${DEFAULT_CLUSTER_NAME}]: " "$DEFAULT_CLUSTER_NAME")
+    CLUSTER_NAME_RESOLVED=yes
     local cluster_ctx="kind-${CLUSTER_NAME}"
     # Only uninstall if a release is actually present, so a reinstall also works as a plain
     # install after a partial/failed deploy. `exit 1` (not return) keeps a stuck-uninstall

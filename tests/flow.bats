@@ -148,6 +148,26 @@ setup() {
     [ "$status" -eq 0 ] && [ "$output" = "values cluster repo-update endpoint wait" ]
 }
 
+@test "install_sumo: reuses an already-resolved cluster name (no second prompt in -i/-r)" {
+    # -i (init_cluster) and -r (reinstall) prompt for the name and set CLUSTER_NAME_RESOLVED;
+    # install_sumo must NOT ask again (the live-test double-prompt). ask_cluster_name is a
+    # tripwire: if install_sumo calls it here, the test fails.
+    run bash -c 'source "$1"; require_cmd(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}; secret_get(){ printf STORED;}
+        ask_cluster_name(){ echo "PROMPTED" >&2; printf "%s" "$2"; }; helm(){ printf "HELM %s\n" "$*"; }
+        CLUSTER_NAME=mycluster; CLUSTER_NAME_RESOLVED=yes; SUMO_SKIP_CRED_CHECK=1; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    # No re-prompt AND the resolved name flows through to the pinned context (combined, last).
+    [[ "$output" != *"PROMPTED"* && "$output" == *"Using cluster 'mycluster'"* && "$output" == *"--kube-context kind-mycluster"* ]]
+}
+
+@test "install_sumo: DOES prompt for the cluster name when called standalone (-m, unresolved)" {
+    run bash -c 'source "$1"; require_cmd(){ :;}; ensure_helm_repo(){ :;}; select_chart_version(){ printf 5.2.0;}; secret_get(){ printf STORED;}
+        ask_cluster_name(){ echo "PROMPTED" >&2; printf "%s" "$2"; }; helm(){ printf "HELM %s\n" "$*"; }
+        CLUSTER_NAME_RESOLVED=""; SUMO_SKIP_CRED_CHECK=1; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PROMPTED"* ]]
+}
+
 @test "install_sumo: unstored credentials prompt cleanly, with no spurious exit-44 ERR-trap report" {
     # The live-test symptom: `security` exits 44 (errSecItemNotFound) when nothing is stored
     # yet — the normal first run — and the ERR trap printed "command failed (exit 44) /
