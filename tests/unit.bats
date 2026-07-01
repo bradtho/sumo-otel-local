@@ -126,6 +126,29 @@ setup() {
     [[ "$output" == *"stdin closed"* ]]
 }
 
+@test "read_secret: echoes a masked confirmation (one '*' per char) so pasted input registers visibly" {
+    # Silent read shows nothing while typing/pasting; the mask confirms the value landed.
+    run bash -c 'source "$1"; printf "abcde\n" | read_secret "Enter secret: "' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    # The value AND an EXACTLY-5-char mask (present at 5, absent at 6 — the flanking globs make
+    # a bare *"*****"* a >=5 lower-bound, so a wrong-length mask would otherwise false-pass).
+    # The mask is stderr-only, so stdout stays exactly the value (the leakage test above pins that).
+    [[ "$output" == *"abcde"* && "$output" == *"*****"* && "$output" != *"******"* ]]
+}
+
+# --- Terminal UI: colours + launch banner (both TTY-gated) ------------------
+
+@test "colours: empty when stderr is not a TTY (keeps piped/CI/captured output plain)" {
+    run bash -c 'source "$1"; printf "[%s][%s][%s]" "$C_CYAN" "$C_RED" "$C_RESET"' _ "$SCRIPT"
+    [ "$output" = "[][][]" ]
+}
+
+@test "banner: prints nothing when stderr is not a TTY (never pollutes captured output)" {
+    run bash -c 'source "$1"; banner; echo DONE' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ "$output" = "DONE" ] # no ASCII art leaked into non-TTY output
+}
+
 @test "ask: EOF/closed stdin falls back to the default without aborting (note on stderr)" {
     # Captured via $() under set -e: an unguarded read would fail and abort the caller.
     run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo ERR_TRAP" ERR; ASSUME_YES=""

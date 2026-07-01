@@ -77,6 +77,19 @@ else
     SECRET_BACKEND="env"
 fi
 
+# Terminal colours for prompts, the banner, and status words. Enabled ONLY when stderr is a
+# TTY and NO_COLOR is unset (https://no-color.org, an ENVIRONMENT convention — so it's read
+# here, before the config file) — piped/redirected/CI output, and the captured output the
+# test suite asserts on, stay plain (no escape codes leak in). UI goes to stderr, so the gate
+# is on fd 2. Defined before the config load so the loader's own warnings can use them. Bash
+# 3.2: plain string vars, not an associative array.
+if [[ -t 2 && -z "${NO_COLOR:-}" ]]; then
+    C_RESET=$'\033[0m' C_BOLD=$'\033[1m' C_DIM=$'\033[2m'
+    C_RED=$'\033[31m' C_GREEN=$'\033[32m' C_YELLOW=$'\033[33m' C_CYAN=$'\033[36m'
+else
+    C_RESET="" C_BOLD="" C_DIM="" C_RED="" C_GREEN="" C_YELLOW="" C_CYAN=""
+fi
+
 # Optional project-local config for repeatable runs. A shell snippet of KEY=value lines
 # (no YAML parser needed); it is sourced with `set -a` BEFORE the constants below, so it
 # can set any env knob the script reads: CONTAINER_RUNTIME, CLUSTER_NAME, HELM_VALUES,
@@ -90,15 +103,15 @@ if [[ -f "$SUMO_CONFIG_FILE" ]]; then
         # Discourage plaintext credentials on disk: warn if the file assigns them (the loader
         # still sources it, but creds belong in secret storage or SUMOLOGIC_ACCESS_ID/KEY).
         if grep -qE '^[[:space:]]*(export[[:space:]]+)?SUMOLOGIC_ACCESS_(ID|KEY)=' "$SUMO_CONFIG_FILE"; then
-            echo "Warning: ${SUMO_CONFIG_FILE} sets Sumo credentials — storing them in a plaintext" >&2
-            echo "         config on disk is discouraged; prefer secret storage or the environment." >&2
+            echo "${C_YELLOW}Warning: ${SUMO_CONFIG_FILE} sets Sumo credentials — storing them in a plaintext" >&2
+            echo "         config on disk is discouraged; prefer secret storage or the environment.${C_RESET}" >&2
         fi
         set -a
         # shellcheck disable=SC1090
         . "$SUMO_CONFIG_FILE"
         set +a
     else
-        echo "Warning: config file ${SUMO_CONFIG_FILE} exists but is not readable; skipping it." >&2
+        echo "${C_YELLOW}Warning: config file ${SUMO_CONFIG_FILE} exists but is not readable; skipping it.${C_RESET}" >&2
     fi
 fi
 
@@ -260,7 +273,7 @@ function confirm {
     fi
     # On EOF/closed stdin (e.g. piped input with no -y) fall back to the default with a
     # clear note, rather than letting the unguarded read fail and abort via the ERR trap.
-    if ! read -rp "${prompt} ${hint} " reply; then
+    if ! read -rp "${C_BOLD}${C_CYAN}${prompt} ${hint}${C_RESET} " reply; then
         echo "No input (stdin closed); using default '${default}'. Pass -y to run unattended." >&2
         reply=$default
     fi
@@ -279,7 +292,7 @@ function ask {
     # On EOF/closed stdin (e.g. piped input with no -y) fall back to the default with a
     # note on stderr, rather than letting the unguarded read fail and abort via the ERR
     # trap (ask is captured with $(...), so the note must not go to stdout).
-    if ! read -rp "$prompt" reply; then
+    if ! read -rp "${C_BOLD}${C_CYAN}${prompt}${C_RESET}" reply; then
         echo "No input (stdin closed); using default '${default}'. Pass -y to run unattended." >&2
     fi
     printf '%s' "${reply:-$default}"
@@ -293,13 +306,17 @@ function ask {
 function read_secret {
     local prompt=$1 value
     while true; do
-        if ! read -rsp "$prompt" value; then
+        if ! read -rsp "${C_BOLD}${C_CYAN}${prompt}${C_RESET}" value; then
             echo "" >&2
             echo "No input (stdin closed); aborting." >&2
             return 1
         fi
         echo "" >&2
         if [[ -n "$value" ]]; then
+            # Silent read shows nothing as you type/paste; echo a masked confirmation (one '*'
+            # per character) so it's clear the value registered and its length looks right,
+            # without revealing it. To stderr, so the captured stdout stays exactly the value.
+            printf '%s\n' "${C_DIM}${value//?/*}${C_RESET}" >&2
             printf '%s' "$value"
             return 0
         fi
@@ -1375,13 +1392,13 @@ function resolve_sumo_endpoint {
     if [[ -n "$want" ]]; then
         base=$(sumo_region_to_endpoint "$want")
         case "$base" in
-            http://*) echo "Warning: '${base}' is http:// — credentials will be sent unencrypted." >&2 ;;
+            http://*) echo "${C_YELLOW}Warning: '${base}' is http:// — credentials will be sent unencrypted.${C_RESET}" >&2 ;;
         esac
         echo "Verifying Sumo credentials against ${base}..." >&2
         code=$(sumo_api_status "$base" "$id" "$key")
         case "$code" in
             200 | 403) # 403 = authenticated but limited role: the endpoint/region is right
-                echo "Credentials verified (${base})." >&2
+                echo "${C_GREEN}Credentials verified (${base}).${C_RESET}" >&2
                 RESOLVED_ENDPOINT=$base
                 return 0
                 ;;
@@ -1897,9 +1914,24 @@ function on_error {
     local exit_code=$?
     local line_no=${1:-unknown}
     echo "" >&2
-    echo "Error: command failed (exit ${exit_code}) at line ${line_no}." >&2
+    echo "${C_BOLD}${C_RED}Error: command failed (exit ${exit_code}) at line ${line_no}.${C_RESET}" >&2
     echo "Nothing has been changed or removed. To tear down a cluster, re-run with -u/--uninstall or -p/--purge." >&2
     exit "${exit_code}"
+}
+
+# Print an ASCII banner on launch. Stderr-only and TTY-gated (like colours), so it never
+# pollutes captured stdout or non-interactive/CI output. Purely cosmetic.
+function banner {
+    [[ -t 2 ]] || return 0
+    printf '%s\n' "${C_CYAN}${C_BOLD}" >&2
+    cat >&2 <<'EOF'
+   ___                    ___ _____ ___ _
+  / __|_  _ _ __  ___    / _ \_   _| __| |
+  \__ \ || | '  \/ _ \  | (_) || | | _|| |__
+  |___/\_,_|_|_|_\___/   \___/  |_| |___|____|
+EOF
+    printf '%s  local KinD cluster + Sumo Logic OpenTelemetry collector  ·  v%s%s\n\n' \
+        "${C_RESET}${C_DIM}" "${VERSION}" "${C_RESET}" >&2
 }
 
 # Record the CLI action chosen during parsing. Repeating the same action is idempotent;
@@ -1989,7 +2021,7 @@ function write_config_from_template {
     # A per-user config that may end up holding credentials should not be world-readable;
     # match the chmod-600 convention used for the temp values file.
     chmod 600 "$SUMO_CONFIG_FILE" 2>/dev/null || true
-    echo "Created ${SUMO_CONFIG_FILE} from the template." >&2
+    echo "${C_GREEN}Created ${SUMO_CONFIG_FILE} from the template.${C_RESET}" >&2
     echo "Edit it (e.g. uncomment 'SUMOLOGIC_ENDPOINT=us2'), then re-run to apply." >&2
 }
 
@@ -2093,6 +2125,10 @@ function main {
         esac
         shift
     done
+
+    # Cosmetic launch banner (stderr, TTY-only). Skipped for -v/--version so its stdout stays
+    # a clean, parseable version string.
+    [[ "$action" != "version" ]] && banner
 
     # -h/--help always wins: print usage and exit cleanly, before any error.
     if [[ -n "$show_help" ]]; then

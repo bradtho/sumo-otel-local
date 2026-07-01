@@ -177,6 +177,16 @@ The script reads a few environment variables; all are optional.
   chart's setup job still validates server-side.
 - **`HELM_WAIT_TIMEOUT`** (default: `10m`) — how long `helm --wait` waits for the collector
   pods to become Ready.
+- **`NO_COLOR`** (default: _unset_) — set to any value to disable coloured output and the
+  launch banner ([no-color.org](https://no-color.org)). Colour and the banner are also
+  automatically disabled when output isn't a terminal (pipes, redirects, CI).
+
+### Terminal output
+
+Prompts are coloured and an ASCII banner prints on launch (a real terminal only — piped/CI
+output stays plain). When you enter or paste the Access ID/Key at the silent prompts, a
+masked confirmation (one `*` per character) is echoed so you can see the value registered
+and its length looks right, without revealing it. Set `NO_COLOR` to turn colour/banner off.
 
 Example — force Docker with a smaller footprint, unattended:
 
