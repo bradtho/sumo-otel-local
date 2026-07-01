@@ -1817,21 +1817,25 @@ function purge {
     confirm_destructive "delete the cluster and remove the Podman machine"
     delete_kind_cluster
     if [[ "$has_machine" == "yes" && -n "$running_machine" ]]; then
-        echo "Stopping and Removing the - ${running_machine} - Podman Machine..."
+        # Teardown is already gated by confirm_destructive above (which also made the user
+        # retype the cluster name), so pass --force to `podman machine rm`: without it podman
+        # prints its own file list and a SECOND "Are you sure?" prompt that gets visually lost
+        # in that list. One clear, coloured heading here instead of a buried plain-text prompt.
+        echo "${C_BOLD}${C_MAGENTA}Stopping and removing the '${running_machine}' Podman machine...${C_RESET}"
         podman machine stop "${running_machine}"
-        podman machine rm "${running_machine}"
+        podman machine rm --force "${running_machine}"
     fi
 
     if secret_delete sumologic_access_id; then
-        echo "Removed 'sumologic_access_id' from secret storage."
+        echo "${C_BOLD}${C_GREEN}Removed${C_RESET} '${C_BOLD}sumologic_access_id${C_RESET}' from secret storage."
     else
-        echo "Sumo Logic Access ID not found in secret storage; continuing to purge."
+        echo "${C_YELLOW}Sumo Logic Access ID not found in secret storage; continuing to purge.${C_RESET}"
     fi
 
     if secret_delete sumologic_access_key; then
-        echo "Removed 'sumologic_access_key' from secret storage."
+        echo "${C_BOLD}${C_GREEN}Removed${C_RESET} '${C_BOLD}sumologic_access_key${C_RESET}' from secret storage."
     else
-        echo "Sumo Logic Access Key not found in secret storage; continuing to purge."
+        echo "${C_YELLOW}Sumo Logic Access Key not found in secret storage; continuing to purge.${C_RESET}"
     fi
 }
 

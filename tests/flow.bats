@@ -73,6 +73,23 @@ setup() {
     assert_called '^secret_delete sumologic_access_key'
 }
 
+@test "purge (podman/macOS): removes the machine with --force (no buried podman re-prompt)" {
+    # The teardown is already confirmed via confirm_destructive, so podman machine rm must run
+    # with --force; otherwise podman prints its file list plus a SECOND "Are you sure?" prompt
+    # that gets lost in that list. Guards that the --force suppression isn't dropped.
+    OS=darwin CONTAINER_RUNTIME=podman
+    podman() {
+        if [ "$*" = "machine list --format json" ]; then
+            printf '%s' '[{"Name":"otel","Running":true}]'
+        else
+            echo "podman $*" >>"$CALLS"
+        fi
+    }
+    ASSUME_YES="" FORCE=yes run purge
+    # Combined so the assertion is load-bearing on macOS bats (only a test's last command counts).
+    [ "$status" -eq 0 ] && assert_called '^podman machine rm --force otel'
+}
+
 # --- shared teardown skeleton (prepare_teardown / delete_kind_cluster) -------
 # uninstall and purge share a preamble (require_cmd kind -> select_runtime ->
 # set_kind_provider) and the kind-delete step; guard that the extraction didn't drop
