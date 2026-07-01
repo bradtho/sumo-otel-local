@@ -6,31 +6,35 @@
 
 # --- Usage --------------------------------------------------------------------
 function help {
-    echo "Usage: $0 [options]"
-    echo "Options:"
-    echo "  -h, --help      Display this help message."
-    echo "  -i, --install   Install the dependencies and setup the Sumo Operator."
-    echo "  -n, --init      Install dependencies without setting up the Sumo Operator."
-    echo "  -m, --helm      Install or upgrade the Sumo collector on an existing cluster."
-    echo "  -r, --reinstall Uninstall the Sumo collector then reinstall it (cluster stays)."
-    echo "  -o, --output    Output the rendered Kubernetes manifest YAML file."
-    echo "  -s, --status    Report cluster and collector health (read-only)."
-    echo "  -e, --endpoints Print the Sumo collection endpoints from the 'sumologic' secret."
-    echo "      --forward   Port-forward the traces collector's OTLP receiver to localhost:4317/4318."
-    echo "  -p, --purge     Uninstall the cluster (and, with Podman on macOS, the Podman machine)."
-    echo "  -u, --uninstall Uninstall the Cluster only."
-    echo "  -v, --version   Display the version of the script."
-    echo "      --init-config  Create .sumo-otel-local.env from the bundled template, then edit it"
+    # Flags are coloured bold-green, headings bold, the footer dim. Colour vars are empty
+    # unless stderr is a TTY (set at top level; help is only ever called after that), so the
+    # TEXT is unchanged when captured/piped — the tests match on the plain substrings.
+    local f="${C_BOLD}${C_GREEN}" h="${C_BOLD}" d="${C_DIM}" r="${C_RESET}"
+    echo "${h}Usage:${r} $0 [options]"
+    echo "${h}Options:${r}"
+    echo "  ${f}-h, --help${r}      Display this help message."
+    echo "  ${f}-i, --install${r}   Install the dependencies and setup the Sumo Operator."
+    echo "  ${f}-n, --init${r}      Install dependencies without setting up the Sumo Operator."
+    echo "  ${f}-m, --helm${r}      Install or upgrade the Sumo collector on an existing cluster."
+    echo "  ${f}-r, --reinstall${r} Uninstall the Sumo collector then reinstall it (cluster stays)."
+    echo "  ${f}-o, --output${r}    Output the rendered Kubernetes manifest YAML file."
+    echo "  ${f}-s, --status${r}    Report cluster and collector health (read-only)."
+    echo "  ${f}-e, --endpoints${r} Print the Sumo collection endpoints from the 'sumologic' secret."
+    echo "      ${f}--forward${r}   Port-forward the traces collector's OTLP receiver to localhost:4317/4318."
+    echo "  ${f}-p, --purge${r}     Uninstall the cluster (and, with Podman on macOS, the Podman machine)."
+    echo "  ${f}-u, --uninstall${r} Uninstall the Cluster only."
+    echo "  ${f}-v, --version${r}   Display the version of the script."
+    echo "      ${f}--init-config${r}  Create .sumo-otel-local.env from the bundled template, then edit it"
     echo "                  to preset the Sumo region, cluster, chart version, etc. and skip prompts."
-    echo "  -y, --yes       Run unattended: assume yes and use defaults for all prompts."
+    echo "  ${f}-y, --yes${r}       Run unattended: assume yes and use defaults for all prompts."
     echo "                  (also via the ASSUME_YES env var; --non-interactive is an alias)"
-    echo "  -f, --force     Confirm destructive teardown (-u/-p) non-interactively."
+    echo "  ${f}-f, --force${r}     Confirm destructive teardown (-u/-p) non-interactively."
     echo "                  Required for -u/-p under -y; never read from the environment."
-    echo "      --dry-run   Preview the install flow (-i/-n/-m): print the cluster-create and"
+    echo "      ${f}--dry-run${r}   Preview the install flow (-i/-n/-m): print the cluster-create and"
     echo "                  helm commands without creating/installing anything."
-    echo "  -V, --verbose   Echo each external command (kind/helm/podman) before running it."
+    echo "  ${f}-V, --verbose${r}   Echo each external command (kind/helm/podman) before running it."
     echo
-    echo "Short flags may be combined, e.g. -yi is the same as -y -i."
+    echo "${d}Short flags may be combined, e.g. -yi is the same as -y -i.${r}"
 }
 
 # Detect OS and CPU architecture, normalized to the tokens used by release assets.
@@ -1463,7 +1467,7 @@ function install_sumo {
             echo "Error: Access ID not found and running unattended. Set SUMOLOGIC_ACCESS_ID or store it first." >&2
             exit 1
         fi
-        echo "Sumo Logic Access ID not found in secret storage"
+        echo "${C_YELLOW}Sumo Logic Access ID not found in secret storage${C_RESET}"
         ACCESS_ID=$(read_secret "Enter Sumo Logic Access ID: ") || exit 1
         secret_set sumologic_access_id "$ACCESS_ID"
     fi
@@ -1474,7 +1478,7 @@ function install_sumo {
             echo "Error: Access Key not found and running unattended. Set SUMOLOGIC_ACCESS_KEY or store it first." >&2
             exit 1
         fi
-        echo "Sumo Logic Access Key not found in secret storage"
+        echo "${C_YELLOW}Sumo Logic Access Key not found in secret storage${C_RESET}"
         ACCESS_KEY=$(read_secret "Enter Sumo Logic Access Key: ") || exit 1
         secret_set sumologic_access_key "$ACCESS_KEY"
     fi
@@ -1498,7 +1502,7 @@ function install_sumo {
     # confusing double-prompt; reuse it. A direct -m/--helm leaves CLUSTER_NAME_RESOLVED empty,
     # so install_sumo still prompts (defaulting to any env/config CLUSTER_NAME).
     if [[ -n "$CLUSTER_NAME_RESOLVED" ]]; then
-        echo "Using cluster '${CLUSTER_NAME}'."
+        echo "${C_BOLD}${C_GREEN}Using cluster '${CLUSTER_NAME}'.${C_RESET}"
     else
         CLUSTER_NAME=$(ask_cluster_name "Name of the cluster [default=${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}]: " "${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}")
     fi
@@ -1605,8 +1609,8 @@ EOF
     # Success: surface concrete next steps (label/name reflect fullnameOverride=sumo).
     cat <<EOF
 
-Sumo collector installed — chart ${chart_version}, cluster '${CLUSTER_NAME}'.
-Next steps:
+${C_BOLD}${C_GREEN}Sumo collector installed — chart ${chart_version}, cluster '${CLUSTER_NAME}'.${C_RESET}
+${C_BOLD}Next steps:${C_RESET}
   Watch pods:           kubectl get pods -n sumologic -w
   Tail collector logs:  kubectl logs -n sumologic -l app.kubernetes.io/name=sumo-otelcol-logs-collector -f
   Health check:         $0 -s
@@ -1841,7 +1845,7 @@ function version {
 # "not found" rather than tripping errexit / the ERR trap), and missing tools are
 # reported rather than fatal.
 function status {
-    echo "== sumo-otel-local status =="
+    echo "${C_BOLD}${C_MAGENTA}== sumo-otel-local status ==${C_RESET}"
 
     # Container runtime + KinD provider.
     if select_runtime; then
