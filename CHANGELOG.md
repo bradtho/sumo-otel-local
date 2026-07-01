@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.6.0...sumo-otel-local-v0.7.0) (2026-07-01)
+
+
+### Features
+
+* **cli:** add --init-config and config-file scaffolding/validation ([#28](https://github.com/bradtho/sumo-otel-local/issues/28)) ([4af5f57](https://github.com/bradtho/sumo-otel-local/commit/4af5f57e5ac1f5256dd60c2a88071ff0a1d91f63))
+
 ## [0.6.0](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.5.3...sumo-otel-local-v0.6.0) (2026-07-01)
 
 
