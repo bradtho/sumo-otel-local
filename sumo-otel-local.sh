@@ -380,7 +380,7 @@ function require_cmd {
 # NB: named run_cmd, not run, to avoid clobbering bats-core's `run` when the test suite
 # sources this script.
 function run_cmd {
-    [[ -n "$VERBOSE" ]] && echo "+ $*" >&2
+    [[ -n "$VERBOSE" ]] && echo "${C_BOLD}${C_BLUE}+ $*${C_RESET}" >&2
     "$@"
 }
 
@@ -552,7 +552,7 @@ function install_deps_direct {
 function install_dependencies {
     # --dry-run previews the install flow without side effects, so don't install anything.
     if [[ -n "$DRY_RUN" ]]; then
-        echo "[dry-run] would install any missing dependencies (kind, kubectl, helm, jq, and a container runtime)." >&2
+        echo "${C_BOLD}${C_BLUE}[dry-run]${C_RESET} would install any missing dependencies (kind, kubectl, helm, jq, and a container runtime)." >&2
         return 0
     fi
 
@@ -1086,8 +1086,8 @@ function init_cluster {
     # setup, no Podman machine, no `kind create`. (Shows the pinned-default create command.)
     if [[ -n "$DRY_RUN" ]]; then
         local cn="${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}"
-        echo "[dry-run] would prepare the container runtime, then run:" >&2
-        echo "[dry-run] would run: kind create cluster --name ${cn} --config ${SCRIPT_DIR}/kind-config.yaml --image ${KINDEST_NODE_IMAGE}" >&2
+        echo "${C_BOLD}${C_BLUE}[dry-run]${C_RESET} would prepare the container runtime, then run:" >&2
+        echo "${C_BOLD}${C_BLUE}[dry-run]${C_RESET} would run: kind create cluster --name ${cn} --config ${SCRIPT_DIR}/kind-config.yaml --image ${KINDEST_NODE_IMAGE}" >&2
         return 0
     fi
 
@@ -1586,8 +1586,8 @@ EOF
     # --values path is the temp secrets file, so no credentials are echoed. (Args are
     # space-joined for display; copy-paste needs quoting if a values path has spaces.)
     if [[ -n "$DRY_RUN" ]]; then
-        echo "[dry-run] would run: helm ${helm_args[*]} --dry-run" >&2
-        echo "[dry-run] collector not installed; no changes made." >&2
+        echo "${C_BOLD}${C_BLUE}[dry-run]${C_RESET} would run: helm ${helm_args[*]} --dry-run" >&2
+        echo "${C_BOLD}${C_BLUE}[dry-run]${C_RESET} collector not installed; no changes made." >&2
         return 0
     fi
 
