@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.5.3...sumo-otel-local-v0.6.0) (2026-07-01)
+
+
+### Features
+
+* **cli:** resolve & pre-flight-validate the Sumo deployment endpoint ([#26](https://github.com/bradtho/sumo-otel-local/issues/26)) ([eeaf0b6](https://github.com/bradtho/sumo-otel-local/commit/eeaf0b6b3158e6a7e2b243e46e706dc7bfa9207a))
+
 ## [0.5.3](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.5.2...sumo-otel-local-v0.5.3) (2026-06-30)
 
 
