@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.7.0...sumo-otel-local-v0.8.0) (2026-07-01)
+
+
+### Features
+
+* **cli:** colourise prompts, add a launch banner, and confirm masked secret input ([#30](https://github.com/bradtho/sumo-otel-local/issues/30)) ([ca77964](https://github.com/bradtho/sumo-otel-local/commit/ca77964504321dd03d4c7bbd0bc248636e0f4799))
+
 ## [0.7.0](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.6.0...sumo-otel-local-v0.7.0) (2026-07-01)
 
 
