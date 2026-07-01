@@ -27,7 +27,7 @@ bats tests/flow.bats -f "install_sumo"   # filter by name
 `load_script` (or `source "$SCRIPT"`) sources the script into the test shell. Strict
 mode (`set -Eeuo pipefail`) and the ERR/EXIT traps live in `main()`, guarded by
 `BASH_SOURCE == $0`, so **sourcing has no side effects** — no traps, no arg parsing.
-That means `set -u`/errexit are *off* in tests; assert exit codes explicitly.
+That means `set -u`/errexit are _off_ in tests; assert exit codes explicitly.
 
 ## Driving interactive prompts (the injection seam)
 
@@ -39,7 +39,7 @@ in order of preference:
    its default without reading. Best when you don't care about the prompts themselves.
 
 2. **Override `confirm`/`ask` as functions, mapped by prompt substring.** This is the
-   primary seam — a test maps *prompt → answer* instead of relying on positional stdin,
+   primary seam — a test maps _prompt → answer_ instead of relying on positional stdin,
    so reordering a prompt can't silently feed the wrong answer:
 
    ```bash
@@ -52,7 +52,7 @@ in order of preference:
    ```
 
 3. **Real `read` via stdin** — a here-string (`<<<"y"`) or `</dev/null` (EOF). Use for
-   testing the *real* `confirm`/`ask`/`read_secret` EOF/parsing behavior. Positional, so
+   testing the _real_ `confirm`/`ask`/`read_secret` EOF/parsing behavior. Positional, so
    brittle to reordering — prefer (2) for multi-prompt flows.
 
 **Keep prompt order stable.** `flow.bats` has an `install_sumo … prompt order is stable`
@@ -62,8 +62,8 @@ or remove a prompt and it fails. Update that test deliberately when you change a
 ## Gotchas (learned the hard way)
 
 - **macOS bats only fails a test on its LAST command; Linux bats fails on ANY.** So a
-  wrong *intermediate* assertion passes locally/on the macOS job but fails on
-  `Tests (ubuntu-latest)`. Put the load-bearing assertion last, and to keep *several*
+  wrong _intermediate_ assertion passes locally/on the macOS job but fails on
+  `Tests (ubuntu-latest)`. Put the load-bearing assertion last, and to keep _several_
   load-bearing, combine them into one final command: `[[ A && B ]]` or `cmd1 && cmd2`.
 - **Don't assert on a stub's stdout when it's piped/captured.** `output()` runs
   `helm … | tee`, and `ask` is called in `$(...)`; a stub's stdout is swallowed. Record
@@ -71,9 +71,9 @@ or remove a prompt and it fails. Update that test deliberately when you change a
 - **Don't name a script-level function `run`/`load`/`skip`/`setup`/`teardown`/`bats_*`.**
   Sourcing the script would clobber bats-core's builtin and red the whole suite.
 - **Prove a new test is load-bearing** by mutating the script (a throwaway copy, or append
-  a function redefinition) and confirming the test *fails*. CI is the backstop, but a test
+  a function redefinition) and confirming the test _fails_. CI is the backstop, but a test
   that can't fail is worthless. When combining several checks into one final `[[ A && B ]]`
-  (for macOS), mutation-check *each* clause — it's easy to leave a clause non-load-bearing.
+  (for macOS), mutation-check _each_ clause — it's easy to leave a clause non-load-bearing.
 - **`install_sumo` now does a credential pre-flight check (`curl` to the Sumo API).** Tests
   that exercise `install_sumo` but don't care about it set `SUMO_SKIP_CRED_CHECK=1` (skips
   the network) or stub `curl(){ …; printf <code>; }`. Endpoint/validation tests stub `curl`

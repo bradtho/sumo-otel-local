@@ -1,0 +1,28 @@
+{
+  // Relaxed markdownlint config, in the same spirit as the relaxed .yamllint.yml.
+  // Read by the VS Code markdownlint extension and by markdownlint-cli2.
+  // CHANGELOG.md is excluded via .markdownlintignore (release-please owns it; its
+  // per-version duplicate headings and blank lines can't be hand-fixed).
+
+  // Prose wraps naturally and some backlog bullets are single, very long lines
+  // (line references, quoted commands). A fixed line length is not a project convention.
+  "MD013": false,
+
+  // False positives on this repo's content. TODO.md's dense, multi-line "- [x]" list
+  // items pack many inline code spans per item; markdownlint's cross-line code-span
+  // pairing then mis-detects a "space inside a code span" where there is none (verified:
+  // every flagged span is clean), and its auto-fixer "corrects" them by deleting the
+  // legitimate space BETWEEN a word and a code span (e.g. "Added `tests/`" -> "Added`tests/`").
+  // Rather than corrupt prose, disable it; real space-in-code typos are rare and visible.
+  "MD038": false,
+
+  // Cosmetic table-pipe alignment only (tables render identically either way). Our tables
+  // mix short and very long cells, so a single "aligned"/"compact" style can't satisfy every
+  // row without reflowing content. Not worth the churn.
+  "MD060": false,
+
+  // House style: emphasis (italic) uses underscores — e.g. _(bug, small)_ — while
+  // strong (bold) uses asterisks — e.g. **Done:**. Make both explicit so they don't drift.
+  "MD049": { "style": "underscore" },
+  "MD050": { "style": "asterisk" }
+}

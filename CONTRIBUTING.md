@@ -22,7 +22,7 @@ automated (see the "Release automation" item in [TODO.md](TODO.md)).
 We use [Conventional Commits](https://www.conventionalcommits.org/) so notes and
 SemVer bumps can be derived mechanically. The subject is:
 
-```
+```text
 <type>[optional scope][!]: <description>
 ```
 
@@ -48,7 +48,7 @@ Anything with `!` / `BREAKING CHANGE:` forces a **MAJOR** bump (see the 0.x note
 
 ### Examples (drawn from real changes in this repo)
 
-```
+```text
 feat(runtime): make Docker and Podman both first-class
 fix(helm): register sumologic repo before template/upgrade
 ci: add mock-deployment render + KinD dry-run job
