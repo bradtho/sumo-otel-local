@@ -158,6 +158,15 @@ _P4 backlog clear — see the Done section below._
 
 ## Done
 
+### Live-testing fixes — 2026-07-02
+
+Found while running `./sumo-otel-local.sh --install -y` (unattended, Podman on macOS).
+
+- [x] **Unattended install with no credentials failed late (after deps + Podman-machine selection + cluster reuse); the env-var hint didn't work on the macOS keychain backend; no way to store creds without a full interactive install** — `sumo-otel-local.sh:preflight_credentials, secret_get, store_credentials, main dispatch` _(bug + feature, medium)_
+  **Symptom (live `--install -y`):** with nothing stored, `-i -y` installed dependencies, prompted-and-selected a Podman machine, and reused the cluster, then only errored `Access ID not found and running unattended`. On macOS `secret_get` read `SUMOLOGIC_ACCESS_ID`/`KEY` only on the `env` backend, so the suggested env var was silently ignored on the keychain backend — and creds could only be stored by running an interactive install once.
+  **Done (2026-07-02):** Added **`preflight_credentials`** — on an unattended `-i`/`-m`/`-r` it verifies the Access ID/Key are available (keyring or env) and `credential_is_clean`, then exits fast with guidance **before** `install_dependencies`/`init_cluster`; interactive runs are a no-op (install_sumo still prompts). Wired first in the install/helm/reinstall dispatch. Made **`secret_get` fall back to `SUMOLOGIC_ACCESS_ID`/`KEY` on every backend** (a stored keyring value still wins), so env vars work for unattended/CI on macOS too and the error message is finally accurate. Added a **`--store-credentials`** action that persists creds into the keyring once (masked prompt, or non-interactively from the env) so later `-y` runs reuse them; it refuses on the `env` backend (no keyring) and rejects control-char values. Docs: README credentials section + `help()` + CLAUDE.md + `.env.example`. +12 bats tests; the dispatch fast-fail (`-i -y` bails before deps), the env-var fallback, and the store keyring-guard are mutation-proven. 207 bats green; shell + yamllint + markdownlint clean.
+  **Adversarial review (2026-07-02, read-only 3-lens workflow — security/injection, correctness/consistency, bash-3.2/errtrace):** **no defects.** Confirmed `credential_is_clean` still gates every sink (`curl -K -` stdin config, chmod-600 values-file YAML) before use — an interior-newline env credential is captured intact by `$(...)` and rejected (no validate-vs-consume divergence); `preflight_credentials` provably mirrors `install_sumo`'s resolution (no pass-here/fail-there gap) and checks availability only (the live 401 API check still runs in `install_sumo`); precedence (stored keyring wins) is correct; `${!var:-}` is `set -u` safe and `secret_get` stays ERR-trap-clean inside the capture. One low-severity note it surfaced — because the config file is sourced under `set -a`, a credential in it is now honoured on every backend (previously inert on macOS keychain) — is **discouraged/warned, not blocked**; documented in the loader comment + README.
+
 ### Live-testing fixes — 2026-07-01
 
 Found while running `./sumo-otel-local.sh -i` end-to-end (Podman on macOS).
