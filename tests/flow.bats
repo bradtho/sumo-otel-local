@@ -380,6 +380,64 @@ setup() {
         && "$(cat "$argv")" != *"STORED"* ]]
 }
 
+# --- preflight_credentials (fail fast before deps/Podman/cluster on -y installs) -
+
+@test "preflight_credentials: unattended with no creds fails fast with guidance" {
+    run bash -c 'source "$1"; secret_get(){ printf ""; }; ASSUME_YES=yes; preflight_credentials' _ "$SCRIPT"
+    [ "$status" -eq 1 ]
+    # Combined load-bearing: the fast-fail message AND the actionable --store-credentials hint.
+    [[ "$output" == *"not found and running unattended"* && "$output" == *"--store-credentials"* ]]
+}
+
+@test "preflight_credentials: unattended with creds present passes (no exit)" {
+    run bash -c 'source "$1"; secret_get(){ printf "TOKEN"; }; ASSUME_YES=yes
+        preflight_credentials; echo "PASSED rc=$?"' _ "$SCRIPT"
+    [ "$status" -eq 0 ] && [[ "$output" == *"PASSED rc=0"* ]]
+}
+
+@test "preflight_credentials: interactive (no -y) is a no-op even with no creds" {
+    run bash -c 'source "$1"; secret_get(){ printf ""; }; ASSUME_YES=""
+        preflight_credentials; echo "NOOP rc=$?"' _ "$SCRIPT"
+    [ "$status" -eq 0 ] && [[ "$output" == *"NOOP rc=0"* ]]
+}
+
+@test "preflight_credentials: unattended with a control-char credential is rejected" {
+    run bash -c 'source "$1"; secret_get(){ printf "bad\ttoken"; }; ASSUME_YES=yes; preflight_credentials' _ "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"control characters"* ]]
+}
+
+# --- store_credentials (persist creds into the OS keyring for later -y installs) -
+
+@test "store_credentials: env backend refuses (no keyring to store into)" {
+    run bash -c 'source "$1"; SECRET_BACKEND=env; store_credentials' _ "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"no OS keyring"* && "$output" == *"SUMOLOGIC_ACCESS_ID"* ]]
+}
+
+@test "store_credentials: persists SUMOLOGIC_ACCESS_ID/KEY from the env without prompting" {
+    run bash -c 'source "$1"; SECRET_BACKEND=keychain; secret_set(){ echo "SET $1"; }
+        SUMOLOGIC_ACCESS_ID=id123 SUMOLOGIC_ACCESS_KEY=key456; store_credentials' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    # Combined load-bearing: both secrets stored AND success reported.
+    [[ "$output" == *"SET sumologic_access_id"* && "$output" == *"SET sumologic_access_key"* && "$output" == *"Stored"* ]]
+}
+
+@test "store_credentials: unattended with no env creds errors (can't prompt)" {
+    run bash -c 'source "$1"; SECRET_BACKEND=keychain; ASSUME_YES=yes
+        unset SUMOLOGIC_ACCESS_ID SUMOLOGIC_ACCESS_KEY; store_credentials' _ "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"nothing to store"* ]]
+}
+
+@test "store_credentials: interactive prompt stores the entered values" {
+    run bash -c 'source "$1"; SECRET_BACKEND=keychain; ASSUME_YES=""
+        unset SUMOLOGIC_ACCESS_ID SUMOLOGIC_ACCESS_KEY; secret_set(){ echo "SET $1=$2"; }
+        printf "myid\nmykey\n" | store_credentials' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"SET sumologic_access_id=myid"* && "$output" == *"SET sumologic_access_key=mykey"* ]]
+}
+
 # --- --dry-run / --verbose (install flow) -----------------------------------
 
 @test "install_sumo --dry-run: previews the helm command, installs nothing, and makes NO network call" {

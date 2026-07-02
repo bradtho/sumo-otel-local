@@ -38,7 +38,7 @@ e.g. `-y -i`.
 
 | Flag             | Flow (functions called)                                  |
 | ---------------- | -------------------------------------------------------- |
-| `-i/--install`   | `install_dependencies` → `init_cluster` → `install_sumo` |
+| `-i/--install`   | `preflight_credentials` (unattended) → `install_dependencies` → `init_cluster` → `install_sumo` |
 | `-n/--init`      | `install_dependencies` → `init_cluster`                  |
 | `-m/--helm`      | `install_sumo` (existing cluster)                        |
 | `-o/--output`    | `output` (renders manifests via `helm template`)         |
@@ -63,8 +63,13 @@ Key helper groups:
   `yaml_escape`, `install_sumo`, `output`.
 - **Secrets:** `secret_get`/`secret_set`/`secret_delete`/`secret_env_var` over
   `SECRET_BACKEND` ∈ {`keychain`, `secret-tool`, `env`}. Stored under
-  `sumologic_access_id` / `sumologic_access_key`. Credentials are **never** passed on
-  the Helm CLI — they go in a `chmod 600` temp values file deleted on exit.
+  `sumologic_access_id` / `sumologic_access_key`. `secret_get` falls back to the
+  `SUMOLOGIC_ACCESS_ID`/`KEY` env vars on **every** backend (a stored keyring value wins).
+  `store_credentials` (the `--store-credentials` action) persists creds to the keyring
+  without installing; `preflight_credentials` runs first on an unattended `-i`/`-m`/`-r`
+  and **fails fast** if creds aren't available, before deps/Podman/cluster work.
+  Credentials are **never** passed on the Helm CLI — they go in a `chmod 600` temp values
+  file deleted on exit.
 - **Dependencies:** `install_dependencies` (brew on macOS, direct binary downloads on
   Linux), `install_bin_dir`, `install_binary`, `require_cmd` (fail-fast pre-flight for
   flows that skip dependency install).

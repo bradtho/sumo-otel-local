@@ -66,6 +66,8 @@ Options:
   -p, --purge     Uninstall the cluster (and, with Podman on macOS, the Podman machine).
   -u, --uninstall Uninstall the Cluster only.
   -v, --version   Display the version of the script.
+      --init-config  Create .sumo-otel-local.env from the bundled template (preset region/cluster).
+      --store-credentials  Save the Sumo Access ID/Key in the OS keyring for unattended installs.
   -y, --yes       Run unattended: assume yes and use defaults for all prompts.
                   (also via the ASSUME_YES env var; --non-interactive is an alias)
   -f, --force     Confirm destructive teardown (-u/-p) non-interactively.
@@ -75,13 +77,15 @@ Options:
   -V, --verbose   Echo each external command (kind/helm/podman) before running it.
 ```
 
-Exactly one **action** (`-i`/`-n`/`-m`/`-r`/`-o`/`-s`/`-e`/`--forward`/`-p`/`-u`/`-v`) is run per invocation;
+Exactly one **action** (`-i`/`-n`/`-m`/`-r`/`-o`/`-s`/`-e`/`--forward`/`-p`/`-u`/`-v`/`--init-config`/`--store-credentials`) is run per invocation;
 giving two different actions is rejected with a clear error, and `-h`/`--help` always
 wins. `-y`/`--yes`, `-f`/`--force`, `--dry-run`, and `-V`/`--verbose` are **modifiers** and
 are order-independent — combine any with an action in any order, e.g. `./sumo-otel-local.sh -y -i`
 or `./sumo-otel-local.sh -i -y`. Short flags may also be **clustered**, so `-yi` is
 equivalent to `-y -i`. In unattended mode the Sumo credentials **must** come from
-secret storage or the environment (the script will not block on a prompt).
+the keyring or the environment; an unattended install verifies this **up front** and exits
+fast with guidance if they're missing (run `--store-credentials` once to save them, or
+export `SUMOLOGIC_ACCESS_ID`/`SUMOLOGIC_ACCESS_KEY`).
 
 `--dry-run` previews the install flow without changing anything: `init_cluster` prints the
 `kind create` it would run, and `install_sumo` prints the assembled `helm upgrade --install …`
@@ -165,7 +169,10 @@ The script reads a few environment variables; all are optional.
   (or enter one), defaulting to the pin; unattended runs (`-y`) use the pin. The chosen
   version is echoed on install so runs are reproducible.
 - **`SUMOLOGIC_ACCESS_ID`** / **`SUMOLOGIC_ACCESS_KEY`** (default: _unset_) — your Sumo
-  credentials, used when no secret backend is available (see below).
+  credentials. Honoured on **every** backend as a fallback: a value stored in the
+  Keychain/secret-tool takes precedence, otherwise these env vars are used. The simplest
+  way to feed credentials to an unattended (`-y`) or CI run (see
+  [Credentials](#credentials--secret-storage)).
 - **`SUMOLOGIC_ENDPOINT`** (default: _unset_ → prompt, then auto-detect) — your Sumo
   **deployment**. Accepts a region code (`us1`, `us2`, `au`, `ca`, `de`, `eu`, `fed`,
   `in`, `jp`, `kr`) or a full API URL (`https://api.us2.sumologic.com/api/v1`). Passed to
@@ -246,7 +253,8 @@ overwrite an existing config), then uncomment what you need. On an interactive s
 Point `SUMO_CONFIG_FILE` at another path, or `=/dev/null` to ignore it for a run; the real
 file is git-ignored. For safety it **cannot** enable `--force`, and the loader **warns** if
 it finds `SUMOLOGIC_ACCESS_ID`/`KEY` in it — credentials belong in secret storage or the
-environment, not a plaintext file on disk.
+environment, not a plaintext file on disk. (The file is sourced as environment, so any
+credential in it _is_ used on every backend — this is discouraged and warned, not blocked.)
 
 ## Credentials & secret storage
 
@@ -256,12 +264,28 @@ chosen automatically:
 - **macOS** → Keychain (`security`), under the items `sumologic_access_id` and
   `sumologic_access_key`.
 - **Linux** → libsecret (`secret-tool`), if installed, under the same names.
-- **Fallback** → environment variables `SUMOLOGIC_ACCESS_ID` / `SUMOLOGIC_ACCESS_KEY`
-  (nothing is persisted; export them to avoid re-entering).
+- **Fallback** (no keyring) → environment variables `SUMOLOGIC_ACCESS_ID` /
+  `SUMOLOGIC_ACCESS_KEY` (nothing is persisted; export them to avoid re-entering).
 
-Both entries are named `sumologic_access_id` and `sumologic_access_key`. The install
-flow only prompts when an entry is **not found** — once stored, it is reused silently,
-so to change credentials you must overwrite or delete the stored entry (see below).
+`SUMOLOGIC_ACCESS_ID` / `SUMOLOGIC_ACCESS_KEY` are honoured on **every** backend, not just
+the fallback: a value stored in the keyring takes precedence, otherwise the env vars are
+used — so unattended / CI runs work without an interactive step.
+
+To prepare a machine for unattended installs, either export those env vars, or store the
+credentials in the keyring once with `--store-credentials`:
+
+```bash
+./sumo-otel-local.sh --store-credentials     # prompts (masked), saves to Keychain/secret-tool
+# or non-interactively from the environment:
+SUMOLOGIC_ACCESS_ID=xxxx SUMOLOGIC_ACCESS_KEY=yyyy ./sumo-otel-local.sh --store-credentials
+```
+
+The install flow only prompts when an entry is **not found** — once stored, it is reused
+silently, so to change credentials you overwrite or delete the stored entry (see below).
+
+**Unattended fast-fail:** an unattended install (`-i -y`, and `-m`/`-r`) checks up front
+that credentials are available (keyring or env) and **exits immediately with guidance** if
+not — before installing dependencies, selecting a Podman machine, or touching the cluster.
 
 Credentials are never passed on the Helm command line — they're written to a private,
 `chmod 600` temporary values file that is deleted on exit.

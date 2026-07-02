@@ -16,7 +16,8 @@ STUBS='install_dependencies(){ echo "DEPS_RAN"; }; init_cluster(){ echo "INIT_RA
        uninstall(){ echo "UNINSTALL_RAN f=$FORCE"; }; status(){ echo "STATUS_RAN"; }
        endpoints(){ echo "ENDPOINTS_RAN"; }; forward(){ echo "FORWARD_RAN"; }
        reinstall(){ echo "REINSTALL_RAN"; }; init_config(){ echo "INITCONFIG_RAN"; }
-       maybe_offer_config_init(){ :; }'
+       store_credentials(){ echo "STORECREDS_RAN"; }
+       maybe_offer_config_init(){ :; }; preflight_credentials(){ :; }'
 
 # run_main <args...> : source the script, install stubs, then run main with the args.
 run_main() {
@@ -41,6 +42,25 @@ run_main() {
     run_main --init-config
     [ "$status" -eq 0 ]
     [[ "$output" == *"INITCONFIG_RAN"* ]]
+}
+
+@test "--store-credentials dispatches the store_credentials action" {
+    run_main --store-credentials
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"STORECREDS_RAN"* ]]
+}
+
+# The real point of the pre-check: -i -y with no creds must bail BEFORE install_dependencies
+# (uses the REAL preflight_credentials, not the no-op stub, so it exercises the dispatch wiring).
+@test "-i -y with no credentials fails fast, before installing dependencies" {
+    run bash -c 'source "$1"
+        install_dependencies(){ echo DEPS_RAN; }; init_cluster(){ echo INIT_RAN; }; install_sumo(){ echo SUMO_RAN; }
+        maybe_offer_config_init(){ :; }; secret_get(){ printf ""; }
+        unset SUMOLOGIC_ACCESS_ID SUMOLOGIC_ACCESS_KEY
+        main -i -y' _ "$SCRIPT"
+    [ "$status" -eq 1 ]
+    # Combined load-bearing: it errored on the missing creds AND never reached the deps step.
+    [[ "$output" == *"not found and running unattended"* && "$output" != *"DEPS_RAN"* ]]
 }
 
 @test "-r/--reinstall dispatches the reinstall action" {

@@ -26,6 +26,8 @@ function help {
     echo "  ${f}-v, --version${r}   Display the version of the script."
     echo "      ${f}--init-config${r}  Create .sumo-otel-local.env from the bundled template, then edit it"
     echo "                  to preset the Sumo region, cluster, chart version, etc. and skip prompts."
+    echo "      ${f}--store-credentials${r}  Save the Sumo Access ID/Key in the OS keyring so unattended"
+    echo "                  installs can reuse them (takes SUMOLOGIC_ACCESS_ID/KEY if set, else prompts)."
     echo "  ${f}-y, --yes${r}       Run unattended: assume yes and use defaults for all prompts."
     echo "                  (also via the ASSUME_YES env var; --non-interactive is an alias)"
     echo "  ${f}-f, --force${r}     Confirm destructive teardown (-u/-p) non-interactively."
@@ -99,14 +101,18 @@ fi
 # (no YAML parser needed); it is sourced with `set -a` BEFORE the constants below, so it
 # can set any env knob the script reads: CONTAINER_RUNTIME, CLUSTER_NAME, HELM_VALUES,
 # SUMO_CHART_VERSION, MIN_MEM_MB, MIN_CPU, ASSUME_YES. See .sumo-otel-local.env.example.
-# It deliberately CANNOT set FORCE (that is flag-only; reset below) and is not a place
-# for credentials. Path overridable via SUMO_CONFIG_FILE.
+# It deliberately CANNOT set FORCE (that is flag-only; reset below). Credentials are
+# discouraged here (see the warning below) but — since the file is sourced under `set -a`
+# — a credential in it becomes an env var and IS honoured on every backend, so the guidance
+# is advisory, not enforced. Path overridable via SUMO_CONFIG_FILE.
 SUMO_CONFIG_FILE="${SUMO_CONFIG_FILE:-./.sumo-otel-local.env}"
 if [[ -f "$SUMO_CONFIG_FILE" ]]; then
     if [[ -r "$SUMO_CONFIG_FILE" ]]; then
         echo "Loading config from ${SUMO_CONFIG_FILE}" >&2
-        # Discourage plaintext credentials on disk: warn if the file assigns them (the loader
-        # still sources it, but creds belong in secret storage or SUMOLOGIC_ACCESS_ID/KEY).
+        # Discourage plaintext credentials on disk: warn if the file assigns them. The loader
+        # still sources it under `set -a`, so a credential here becomes an env var and (via
+        # secret_get's env fallback) IS now used on every backend — discouraged, not blocked.
+        # Prefer the keyring (--store-credentials) or SUMOLOGIC_ACCESS_ID/KEY in the environment.
         if grep -qE '^[[:space:]]*(export[[:space:]]+)?SUMOLOGIC_ACCESS_(ID|KEY)=' "$SUMO_CONFIG_FILE"; then
             echo "${C_YELLOW}Warning: ${SUMO_CONFIG_FILE} sets Sumo credentials — storing them in a plaintext" >&2
             echo "         config on disk is discouraged; prefer secret storage or the environment.${C_RESET}" >&2
@@ -1238,11 +1244,15 @@ function secret_get {
     case "$SECRET_BACKEND" in
         keychain) out=$(security find-generic-password -s "$name" -w 2>/dev/null || true) ;;
         secret-tool) out=$(secret-tool lookup service "$name" 2>/dev/null || true) ;;
-        env)
-            var=$(secret_env_var "$name")
-            out=${!var:-}
-            ;;
     esac
+    # Fall back to the env var (e.g. SUMOLOGIC_ACCESS_ID) on ANY backend, not just `env`: a
+    # secret stored in the keychain/secret-tool wins, but SUMOLOGIC_ACCESS_ID/KEY still work
+    # for unattended/CI runs where nothing is in the OS keyring. (On the `env` backend the
+    # case above matches nothing, so this becomes the only lookup — same result as before.)
+    if [[ -z "$out" ]]; then
+        var=$(secret_env_var "$name")
+        out=${!var:-}
+    fi
     [[ -n "$out" ]] && printf '%s' "$out"
     return 0
 }
@@ -1301,6 +1311,46 @@ function credential_is_clean {
         *[[:cntrl:]]*) return 1 ;;
         *) return 0 ;;
     esac
+}
+
+# Persist the Sumo Access ID/Key into the OS keyring (keychain/secret-tool) so later
+# unattended installs can reuse them (the --store-credentials action). Each value is taken
+# from SUMOLOGIC_ACCESS_ID/KEY when set — so `SUMOLOGIC_ACCESS_ID=… --store-credentials`
+# persists non-interactively — otherwise prompted for (masked). Requires a real keyring:
+# on the env backend there is nothing to store into, so it directs the user to export instead.
+function store_credentials {
+    if [[ "$SECRET_BACKEND" == "env" ]]; then
+        echo "Error: no OS keyring available (no Keychain/secret-tool) to store credentials in." >&2
+        echo "Export SUMOLOGIC_ACCESS_ID and SUMOLOGIC_ACCESS_KEY in your environment instead." >&2
+        exit 1
+    fi
+    local id key
+    id="${SUMOLOGIC_ACCESS_ID:-}"
+    if [[ -z "$id" ]]; then
+        if [[ -n "$ASSUME_YES" ]]; then
+            echo "Error: SUMOLOGIC_ACCESS_ID not set and running unattended; nothing to store." >&2
+            exit 1
+        fi
+        id=$(read_secret "Enter Sumo Logic Access ID: ") || exit 1
+    fi
+    key="${SUMOLOGIC_ACCESS_KEY:-}"
+    if [[ -z "$key" ]]; then
+        if [[ -n "$ASSUME_YES" ]]; then
+            echo "Error: SUMOLOGIC_ACCESS_KEY not set and running unattended; nothing to store." >&2
+            exit 1
+        fi
+        key=$(read_secret "Enter Sumo Logic Access Key: ") || exit 1
+    fi
+    # Reject control-char values up front (same rationale as install_sumo): a stray newline/tab
+    # would break out of the curl -K - config line and the values-file YAML scalar downstream.
+    if ! credential_is_clean "$id" || ! credential_is_clean "$key"; then
+        echo "Error: the Sumo Access ID/Key contain control characters (a stray newline/tab?)." >&2
+        exit 1
+    fi
+    secret_set sumologic_access_id "$id"
+    secret_set sumologic_access_key "$key"
+    echo "${C_BOLD}${C_GREEN}Stored${C_RESET} the Sumo Logic Access ID and Access Key (backend: ${SECRET_BACKEND})."
+    echo "Unattended installs (${0##*/} -i -y) can now reuse them."
 }
 
 # Map a Sumo region code OR URL to the API base URL the setup job needs (SUMOLOGIC_BASE_URL
@@ -1455,6 +1505,32 @@ function resolve_sumo_endpoint {
     return 0
 }
 
+# Fast pre-flight for UNATTENDED installs: confirm the Sumo Access ID/Key are available
+# (stored in the keyring or provided via SUMOLOGIC_ACCESS_ID/KEY) BEFORE the expensive
+# dependency install, Podman-machine selection, and cluster creation — so `-i -y` fails
+# immediately with clear guidance instead of only when install_sumo is finally reached.
+# Interactive runs skip this: install_sumo prompts for anything missing. Mirrors install_sumo's
+# resolution (secret_get + credential_is_clean) so a pass here guarantees install_sumo won't
+# abort on credentials.
+function preflight_credentials {
+    [[ -n "$ASSUME_YES" ]] || return 0 # interactive: install_sumo will prompt
+    local id key
+    id=$(secret_get sumologic_access_id)
+    key=$(secret_get sumologic_access_key)
+    if [[ -z "$id" || -z "$key" ]]; then
+        echo "Error: Sumo Logic credentials not found and running unattended." >&2
+        echo "Provide them before an unattended install, either by:" >&2
+        echo "  - exporting SUMOLOGIC_ACCESS_ID and SUMOLOGIC_ACCESS_KEY, or" >&2
+        echo "  - running '${0##*/} --store-credentials' once to save them in the OS keyring." >&2
+        exit 1
+    fi
+    if ! credential_is_clean "$id" || ! credential_is_clean "$key"; then
+        echo "Error: the Sumo Access ID/Key contain control characters (a stray newline/tab?)." >&2
+        echo "Fix SUMOLOGIC_ACCESS_ID/KEY or the stored secret before re-running." >&2
+        exit 1
+    fi
+}
+
 function install_sumo {
     require_cmd helm
 
@@ -1468,7 +1544,7 @@ function install_sumo {
     ACCESS_ID=$(secret_get sumologic_access_id)
     if [[ -z "$ACCESS_ID" ]]; then
         if [[ -n "$ASSUME_YES" ]]; then
-            echo "Error: Access ID not found and running unattended. Set SUMOLOGIC_ACCESS_ID or store it first." >&2
+            echo "Error: Access ID not found and running unattended. Export SUMOLOGIC_ACCESS_ID or run '${0##*/} --store-credentials' first." >&2
             exit 1
         fi
         echo "${C_YELLOW}Sumo Logic Access ID not found in secret storage${C_RESET}"
@@ -1479,7 +1555,7 @@ function install_sumo {
     ACCESS_KEY=$(secret_get sumologic_access_key)
     if [[ -z "$ACCESS_KEY" ]]; then
         if [[ -n "$ASSUME_YES" ]]; then
-            echo "Error: Access Key not found and running unattended. Set SUMOLOGIC_ACCESS_KEY or store it first." >&2
+            echo "Error: Access Key not found and running unattended. Export SUMOLOGIC_ACCESS_KEY or run '${0##*/} --store-credentials' first." >&2
             exit 1
         fi
         echo "${C_YELLOW}Sumo Logic Access Key not found in secret storage${C_RESET}"
@@ -2138,6 +2214,7 @@ function main {
             -u | --uninstall) set_action uninstall ;;
             -v | --version) set_action version ;;
             --init-config) set_action init_config ;;
+            --store-credentials) set_action store_credentials ;;
             # Modifiers (not actions): order-independent, may appear before or after.
             -y | --yes | --non-interactive) ASSUME_YES="yes" ;;
             -f | --force) FORCE="yes" ;;
@@ -2165,7 +2242,7 @@ function main {
     fi
 
     if [[ -n "$conflict" ]]; then
-        echo "Specify exactly one action (-i/-n/-m/-r/-o/-s/-e/--forward/-p/-u/-v/--init-config)." >&2
+        echo "Specify exactly one action (-i/-n/-m/-r/-o/-s/-e/--forward/-p/-u/-v/--init-config/--store-credentials)." >&2
         help >&2
         exit 1
     fi
@@ -2185,6 +2262,7 @@ function main {
 
     case "$action" in
         install)
+            preflight_credentials # fail fast (unattended) before deps/Podman/cluster work
             install_dependencies
             init_cluster
             install_sumo
@@ -2193,8 +2271,14 @@ function main {
             install_dependencies
             init_cluster
             ;;
-        helm) install_sumo ;;
-        reinstall) reinstall ;;
+        helm)
+            preflight_credentials
+            install_sumo
+            ;;
+        reinstall)
+            preflight_credentials # before the release uninstall reinstall performs
+            reinstall
+            ;;
         output) output ;;
         status) status ;;
         endpoints) endpoints ;;
@@ -2203,8 +2287,9 @@ function main {
         uninstall) uninstall ;;
         version) version ;;
         init_config) init_config ;;
+        store_credentials) store_credentials ;;
         *)
-            echo "Specify exactly one action (-i/-n/-m/-r/-o/-s/-e/--forward/-p/-u/-v/--init-config), or -h for help." >&2
+            echo "Specify exactly one action (-i/-n/-m/-r/-o/-s/-e/--forward/-p/-u/-v/--init-config/--store-credentials), or -h for help." >&2
             help >&2
             exit 1
             ;;

@@ -60,14 +60,30 @@ setup() {
 # captured with $(...), so under `set -E` a non-zero return there tripped the ERR trap INSIDE
 # the command-substitution subshell. secret_get must instead return 0 with empty stdout.
 @test "secret_get: a missing secret returns empty and does NOT trip the ERR trap" {
+    # unset the env vars: secret_get now falls back to SUMOLOGIC_ACCESS_ID/KEY on the keychain
+    # backend too, so a stray one in the ambient env would otherwise mask the "nothing stored" case.
     run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo TRAP_FIRED" ERR
-        SECRET_BACKEND=keychain; security(){ return 44; }
+        SECRET_BACKEND=keychain; security(){ return 44; }; unset SUMOLOGIC_ACCESS_ID SUMOLOGIC_ACCESS_KEY
         val=$(secret_get sumologic_access_id); rc=$?
         printf "rc=%s val=[%s]\n" "$rc" "$val"' _ "$SCRIPT"
     [ "$status" -eq 0 ]
     [[ "$output" != *"TRAP_FIRED"* ]]
     # Combined so BOTH are load-bearing on macOS bats (last-command-only): clean rc AND empty.
     [[ "$output" == *"rc=0 val=[]"* ]]
+}
+
+@test "secret_get (keychain): falls back to SUMOLOGIC_ACCESS_ID when the keyring is empty" {
+    run bash -c 'source "$1"; SECRET_BACKEND=keychain; security(){ return 44; }   # keyring empty
+        SUMOLOGIC_ACCESS_ID=fromenv
+        printf "[%s]" "$(secret_get sumologic_access_id)"' _ "$SCRIPT"
+    [ "$output" = "[fromenv]" ]
+}
+
+@test "secret_get (keychain): a stored secret takes precedence over the env var" {
+    run bash -c 'source "$1"; SECRET_BACKEND=keychain; security(){ printf "STORED"; }   # keyring has it
+        SUMOLOGIC_ACCESS_ID=fromenv
+        printf "[%s]" "$(secret_get sumologic_access_id)"' _ "$SCRIPT"
+    [ "$output" = "[STORED]" ]
 }
 
 @test "secret_get (keychain): prints the stored value when present" {
@@ -79,7 +95,7 @@ setup() {
 }
 
 @test "secret_get (env): reads the uppercased env var, empty when unset (safe under set -u)" {
-    run bash -c 'source "$1"; set -u; SECRET_BACKEND=env; SUMOLOGIC_ACCESS_ID=fromenv
+    run bash -c 'source "$1"; set -u; SECRET_BACKEND=env; SUMOLOGIC_ACCESS_ID=fromenv; unset SUMOLOGIC_ACCESS_KEY
         printf "[%s][%s]" "$(secret_get sumologic_access_id)" "$(secret_get sumologic_access_key)"' _ "$SCRIPT"
     [ "$status" -eq 0 ]
     [ "$output" = "[fromenv][]" ]
