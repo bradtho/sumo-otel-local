@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.0](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.9.0...sumo-otel-local-v0.10.0) (2026-07-02)
+
+
+### Features
+
+* **cli:** fast credential pre-check for unattended installs, env-var fallback, and --store-credentials ([#37](https://github.com/bradtho/sumo-otel-local/issues/37)) ([a97f9ff](https://github.com/bradtho/sumo-otel-local/commit/a97f9ff816bf77cad57185cde643782cdd5281f5))
+* **cli:** stream a Helm-install progress heartbeat so long waits don't look hung ([#39](https://github.com/bradtho/sumo-otel-local/issues/39)) ([e102e5d](https://github.com/bradtho/sumo-otel-local/commit/e102e5d92b3c73a616d67b0cb860e141f3790405))
+
 ## [0.9.0](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.8.0...sumo-otel-local-v0.9.0) (2026-07-01)
 
 
