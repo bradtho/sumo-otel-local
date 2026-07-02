@@ -195,6 +195,14 @@ output stays plain). When you enter or paste the Access ID/Key at the silent pro
 masked confirmation (one `*` per character) is echoed so you can see the value registered
 and its length looks right, without revealing it. Set `NO_COLOR` to turn colour/banner off.
 
+The Helm install can block for several minutes — first on the one-time `sumo-setup` Job
+(a pre-install hook helm always waits on), then, if you keep the default `--wait`, on the
+collector pods becoming Ready. On a terminal a live **progress heartbeat** (elapsed time +
+`kubectl get pods` status, every ~15s) prints during that wait so it's obviously still
+working, and on failure the `sumo-setup` Job's recent logs are shown automatically so the
+cause is visible. In non-terminal contexts (CI, pipes) the install runs inline without the
+heartbeat, and `helm`'s own output is preserved.
+
 Example — force Docker with a smaller footprint, unattended:
 
 ```bash

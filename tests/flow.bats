@@ -225,14 +225,17 @@ setup() {
     [[ "$output" != *"--wait"* ]]
 }
 
-@test "install_sumo: a failed install hints at -s without tripping the ERR trap or printing next steps" {
+@test "install_sumo: a failed install hints at -s, dumps sumo-setup logs, no ERR trap, no next steps" {
     run bash -c 'source "$1"; set -Eeuo pipefail; trap "echo TRAP_FIRED" ERR
         require_cmd(){ :;}; ensure_helm_repo(){ :;}; secret_get(){ printf STORED;}; select_chart_version(){ printf 5.2.0;}
-        helm(){ return 1; }; SUMO_SKIP_CRED_CHECK=1; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
+        helm(){ return 1; }
+        kubectl(){ case "$*" in *"logs job/sumo-setup"*) echo "SETUP_LOG: auth failed";; esac; }
+        SUMO_SKIP_CRED_CHECK=1; ASSUME_YES=yes; install_sumo' _ "$SCRIPT"
     [ "$status" -ne 0 ]
     [[ "$output" != *"TRAP_FIRED"* ]]
-    [[ "$output" == *"did not complete"* ]]
-    [[ "$output" != *"Next steps"* ]]
+    # Combined load-bearing: the clean hint AND the auto-dumped sumo-setup Job logs (so the
+    # failure reason is visible without a second command) AND no misleading "Next steps".
+    [[ "$output" == *"did not complete"* && "$output" == *"SETUP_LOG: auth failed"* && "$output" != *"Next steps"* ]]
 }
 
 # --- Sumo endpoint resolution + credential pre-flight check -----------------

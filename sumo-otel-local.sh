@@ -1673,14 +1673,60 @@ EOF
 
     # Optionally block until the collector pods are Ready (helm --wait). Default yes;
     # decline for a fire-and-forget install and check progress with -s/--status.
+    local wait_enabled=""
     if confirm "Wait for the collector pods to become ready?" y; then
         helm_args+=(--wait --timeout "$HELM_WAIT_TIMEOUT")
+        wait_enabled=yes
     fi
 
-    # Guard the install so a failure (incl. a --wait timeout) gives an actionable hint
-    # rather than the generic ERR-trap message. run_cmd echoes it first under --verbose.
-    if ! run_cmd helm "${helm_args[@]}"; then
+    # helm blocks SILENTLY while its pre-install `sumo-setup` Job runs (helm always waits on
+    # pre-install hooks, --wait or not) and, with --wait, while the collector pods become
+    # Ready — often several minutes with no output, which looks hung. On a real terminal
+    # (stderr is a TTY) run helm in the background and stream a progress heartbeat (elapsed +
+    # pod/Job status) so it's clearly still working. In non-TTY contexts (CI, pipes, the test
+    # suite) run it inline as before — a heartbeat would just spam the log, and this keeps the
+    # behaviour (and existing tests) unchanged. Either way capture the real exit code.
+    local helm_rc=0
+    if [[ "$wait_enabled" == "yes" && -t 2 ]]; then
+        [[ -n "$VERBOSE" ]] && echo "${C_BOLD}${C_BLUE}+ helm ${helm_args[*]}${C_RESET}" >&2
+        echo "${C_BOLD}${C_BLUE}Installing the Sumo collector${C_RESET} — runs a one-time setup Job, then waits for pods (up to ${HELM_WAIT_TIMEOUT}); this can take a few minutes." >&2
+        helm "${helm_args[@]}" &
+        local helm_pid=$! waited=0 interval=15
+        # A backgrounded child ignores SIGINT in this non-job-control shell, so a bare Ctrl-C
+        # would leave helm ORPHANED (still mutating the cluster) while the parent exits and the
+        # EXIT trap removes the --values secrets file out from under it. Trap INT/TERM for the
+        # wait: SIGTERM + reap helm (quietly — suppressing bash's "Terminated" job notice), warn
+        # the cluster may be half-installed, and exit 130. Killing+reaping helm here means it is
+        # dead before the EXIT trap unlinks the secrets file, so there's no read-vs-delete race.
+        # shellcheck disable=SC2064  # single-quoted on purpose: $helm_pid resolves when signalled
+        trap 'trap - INT TERM; { kill "$helm_pid"; wait "$helm_pid"; } 2>/dev/null || true; echo >&2; echo "Install interrupted — stopped helm; the cluster may be partially installed. Check with: $0 -s" >&2; exit 130' INT TERM
+        while kill -0 "$helm_pid" 2>/dev/null; do
+            sleep "$interval"
+            kill -0 "$helm_pid" 2>/dev/null || break # finished during the sleep
+            waited=$((waited + interval))
+            echo "${C_DIM}  … still installing (${waited}s elapsed):${C_RESET}" >&2
+            if command -v kubectl >/dev/null 2>&1; then
+                kubectl --context "kind-${CLUSTER_NAME}" -n sumologic get pods --no-headers 2>/dev/null |
+                    awk '{printf "      %-46s %-7s %s\n", $1, $2, $3}' >&2 || true
+            fi
+        done
+        wait "$helm_pid" || helm_rc=$?
+        trap - INT TERM # helm is done; restore default signal handling
+    else
+        # Guard the install so a failure (incl. a --wait timeout) gives an actionable hint
+        # rather than the generic ERR-trap message. run_cmd echoes it first under --verbose.
+        run_cmd helm "${helm_args[@]}" || helm_rc=$?
+    fi
+
+    if [[ "$helm_rc" -ne 0 ]]; then
         echo "Helm install did not complete cleanly (see the error above)." >&2
+        # The pre-install sumo-setup Job is the usual culprit (rejected creds/region, quota,
+        # connectivity). Dump its recent logs so the reason is visible without a second command.
+        if command -v kubectl >/dev/null 2>&1; then
+            echo "Recent sumo-setup Job logs (namespace sumologic):" >&2
+            kubectl --context "kind-${CLUSTER_NAME}" -n sumologic logs job/sumo-setup --tail=30 2>/dev/null |
+                sed 's/^/  /' >&2 || true
+        fi
         echo "Inspect what's deployed:  $0 -s" >&2
         echo "Watch the pods:           kubectl get pods -n sumologic -w" >&2
         exit 1
