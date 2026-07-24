@@ -537,6 +537,22 @@ setup() {
     assert_called "^podman exec sumo-worker systemctl restart containerd"
 }
 
+@test "inject_extra_ca_certs: colon-separated paths are each copied into every node" {
+    local cert1="${BATS_TEST_TMPDIR}/root-ca.pem"
+    local cert2="${BATS_TEST_TMPDIR}/intermediate-ca.pem"
+    echo "fake cert 1" >"$cert1"
+    echo "fake cert 2" >"$cert2"
+    kind() { printf 'sumo-control-plane\n'; } # override setup()'s CALLS-logging stub
+    CONTAINER_RUNTIME=podman
+    EXTRA_CA_CERTS="${cert1}:${cert2}"
+    run inject_extra_ca_certs sumo
+    [ "$status" -eq 0 ]
+    assert_called "^podman cp ${cert1} sumo-control-plane:/usr/local/share/ca-certificates/root-ca.pem"
+    assert_called "^podman cp ${cert2} sumo-control-plane:/usr/local/share/ca-certificates/intermediate-ca.pem"
+    assert_called "^podman exec sumo-control-plane update-ca-certificates"
+    assert_called "^podman exec sumo-control-plane systemctl restart containerd"
+}
+
 @test "init_cluster: STRIP_DNS_SEARCH_DOMAINS set triggers strip_dns_search_domains after a fresh create" {
     run bash -c 'source "$1"; trap - ERR EXIT
         select_runtime(){ CONTAINER_RUNTIME=docker; return 0; }
