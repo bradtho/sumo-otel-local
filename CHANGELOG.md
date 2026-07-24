@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.10.0...sumo-otel-local-v0.11.0) (2026-07-24)
+
+
+### Features
+
+* **cli:** trust corporate CAs and fix DNS search-suffix collisions inside KinD nodes ([#40](https://github.com/bradtho/sumo-otel-local/issues/40)) ([25cd5cd](https://github.com/bradtho/sumo-otel-local/commit/25cd5cdcd25e3583f6f5ea875d4da5cd291ecea5))
+
 ## [0.10.0](https://github.com/bradtho/sumo-otel-local/compare/sumo-otel-local-v0.9.0...sumo-otel-local-v0.10.0) (2026-07-02)
 
 
