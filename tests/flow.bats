@@ -487,6 +487,118 @@ setup() {
         && [[ "$output" == *"kind create cluster --name sumo --config"*"--image kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5"* ]]
 }
 
+@test "init_cluster: EXTRA_CA_CERTS set triggers inject_extra_ca_certs after a fresh create" {
+    local cert="${BATS_TEST_TMPDIR}/extra-ca.pem"
+    echo "fake cert" >"$cert"
+    run bash -c 'source "$1"; trap - ERR EXIT
+        select_runtime(){ CONTAINER_RUNTIME=docker; return 0; }
+        set_kind_provider(){ :; }; ensure_docker_ready(){ :; }
+        cluster_exists(){ return 1; }
+        kind(){ echo "kind $*"; }
+        docker(){ echo "docker $*"; }
+        EXTRA_CA_CERTS="$2"
+        ASSUME_YES=yes; init_cluster' _ "$SCRIPT" "$cert"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Trusting 1 extra CA cert(s) inside cluster 'sumo'"* ]]
+}
+
+# --- inject_extra_ca_certs (corporate TLS-inspection support) ---------------
+
+@test "inject_extra_ca_certs: no-op (no kind/runtime calls) when EXTRA_CA_CERTS is unset" {
+    CONTAINER_RUNTIME=podman
+    EXTRA_CA_CERTS=""
+    run inject_extra_ca_certs sumo
+    [ "$status" -eq 0 ]
+    [ ! -s "$CALLS" ]
+}
+
+@test "inject_extra_ca_certs: a missing cert path fails fast before touching kind/runtime" {
+    CONTAINER_RUNTIME=podman
+    EXTRA_CA_CERTS="${BATS_TEST_TMPDIR}/does-not-exist.pem"
+    run inject_extra_ca_certs sumo
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"not found or unreadable"* ]]
+    [ ! -s "$CALLS" ]
+}
+
+@test "inject_extra_ca_certs: copies each cert into every node and restarts containerd" {
+    local cert="${BATS_TEST_TMPDIR}/extra-ca.pem"
+    echo "fake cert" >"$cert"
+    kind() { printf 'sumo-control-plane\nsumo-worker\n'; } # override setup()'s CALLS-logging stub
+    CONTAINER_RUNTIME=podman
+    EXTRA_CA_CERTS="$cert"
+    run inject_extra_ca_certs sumo
+    [ "$status" -eq 0 ]
+    assert_called "^podman cp ${cert} sumo-control-plane:/usr/local/share/ca-certificates/extra-ca.pem"
+    assert_called "^podman exec sumo-control-plane update-ca-certificates"
+    assert_called "^podman exec sumo-control-plane systemctl restart containerd"
+    assert_called "^podman cp ${cert} sumo-worker:/usr/local/share/ca-certificates/extra-ca.pem"
+    assert_called "^podman exec sumo-worker update-ca-certificates"
+    assert_called "^podman exec sumo-worker systemctl restart containerd"
+}
+
+@test "init_cluster: STRIP_DNS_SEARCH_DOMAINS set triggers strip_dns_search_domains after a fresh create" {
+    run bash -c 'source "$1"; trap - ERR EXIT
+        select_runtime(){ CONTAINER_RUNTIME=docker; return 0; }
+        set_kind_provider(){ :; }; ensure_docker_ready(){ :; }
+        cluster_exists(){ return 1; }
+        kind(){ echo "kind $*"; }
+        docker(){ echo "docker $*"; }
+        STRIP_DNS_SEARCH_DOMAINS="corp.example.com"
+        ASSUME_YES=yes; init_cluster' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Stripping DNS search suffix(es) [corp.example.com] from cluster 'sumo'"* ]]
+}
+
+# --- strip_dns_search_domains (corporate DNS search-suffix collision) -------
+
+@test "strip_dns_search_domains: no-op (no kind/runtime calls) when STRIP_DNS_SEARCH_DOMAINS is unset" {
+    CONTAINER_RUNTIME=podman
+    STRIP_DNS_SEARCH_DOMAINS=""
+    run strip_dns_search_domains sumo
+    [ "$status" -eq 0 ]
+    [ ! -s "$CALLS" ]
+}
+
+@test "strip_dns_search_domains: execs into every node with the suffix list" {
+    kind() { printf 'sumo-control-plane\nsumo-worker\n'; } # override setup()'s CALLS-logging stub
+    CONTAINER_RUNTIME=podman
+    STRIP_DNS_SEARCH_DOMAINS="sumologic.com:sumologic.net"
+    run strip_dns_search_domains sumo
+    [ "$status" -eq 0 ]
+    assert_called "^podman exec sumo-control-plane sh -c"
+    assert_called "^podman exec sumo-worker sh -c"
+    assert_called "sh sumologic.com sumologic.net\$"
+}
+
+@test "strip_dns_search_domains: actually rewrites a resolv.conf's search line correctly" {
+    local resolv="${BATS_TEST_TMPDIR}/resolv.conf"
+    printf 'search dns.podman sumologic.com sumologic.net\nnameserver 10.89.0.1\n' >"$resolv"
+    # Run the exact script strip_dns_search_domains execs into a node, against a
+    # real file, to prove the awk logic itself is correct (not just that it's
+    # invoked) -- bypassing kind/podman entirely since this only needs a shell.
+    run bash -c '
+        strip="$1"
+        awk -v strip="$strip" "
+            BEGIN { n = split(strip, arr, \" \"); for (i = 1; i <= n; i++) bad[arr[i]] = 1 }
+            /^search / {
+                out = \"search\"
+                for (i = 2; i <= NF; i++) if (!(\$i in bad)) out = out \" \" \$i
+                print out
+                next
+            }
+            { print }
+        " "$2" >"$2.stripped" &&
+        cat "$2.stripped" >"$2" &&
+        rm -f "$2.stripped"
+    ' sh "sumologic.com sumologic.net" "$resolv"
+    [ "$status" -eq 0 ]
+    run cat "$resolv"
+    [[ "$output" == *"search dns.podman"* ]]
+    [[ "$output" != *"sumologic"* ]]
+    [[ "$output" == *"nameserver 10.89.0.1"* ]]
+}
+
 @test "uninstall --verbose echoes the kind delete before running it" {
     run bash -c 'source "$1"; require_cmd(){ :;}; select_runtime(){ CONTAINER_RUNTIME=docker; return 0; }; set_kind_provider(){ :; }
         kind(){ echo KIND_RAN; }; VERBOSE=yes; FORCE=yes; uninstall' _ "$SCRIPT"

@@ -138,6 +138,30 @@ fi
 # the interactive prompt (e.g. CONTAINER_RUNTIME=docker); select_runtime fills it in.
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-}"
 
+# Extra CA certificates to trust inside every KinD node — for networks with a TLS-
+# inspecting proxy (Netskope, Zscaler, etc.) that re-signs outbound HTTPS with an
+# internal CA. The host trusts that CA (it's in the OS/system trust store), but a
+# freshly created KinD node is a separate, minimal container and does NOT inherit
+# it, so every image pull inside the cluster fails with "x509: certificate signed
+# by unknown authority" even though `curl`/`docker pull` on the host work fine.
+# Opt-in, colon-separated PEM file paths; empty by default, so nobody outside an
+# intercepted network pays for this. See inject_extra_ca_certs.
+EXTRA_CA_CERTS="${EXTRA_CA_CERTS:-}"
+
+# Extra DNS search-domain suffixes to strip from every KinD node's resolv.conf. Some
+# networks put an internal suffix (e.g. a corporate domain) in the host's DNS search
+# path, which gets baked into every KinD node's resolv.conf. Kubernetes' default pod
+# DNS policy sets `ndots:5`, which tries EVERY search suffix before the bare
+# hostname — so an ordinary external lookup like "registry.terraform.io" (well
+# under 5 dots) gets rewritten to "registry.terraform.io.<suffix>" FIRST, and if
+# that suffix's DNS zone resolves broadly (e.g. a wildcard record), a pod silently
+# connects to the wrong host and gets a hostname-mismatched TLS cert — with no CA
+# trust issue in sight to explain it. Opt-in, colon-separated suffixes (e.g. your
+# own or a customer's internal domain); empty by default, since this only matters
+# on networks where a search-domain suffix happens to resolve broadly. See
+# strip_dns_search_domains.
+STRIP_DNS_SEARCH_DOMAINS="${STRIP_DNS_SEARCH_DOMAINS:-}"
+
 # Helm repository for the Sumo Logic collection.
 SUMO_HELM_REPO_URL="https://sumologic.github.io/sumologic-kubernetes-collection"
 
@@ -1091,6 +1115,77 @@ function cluster_exists {
     kind get clusters 2>/dev/null | grep -Fxq "$1"
 }
 
+# Trust each cert in EXTRA_CA_CERTS (colon-separated PEM paths) inside every node of
+# $1's cluster, then restart containerd so image pulls pick up the new trust
+# immediately. No-op when EXTRA_CA_CERTS is unset (the default) — this only runs at
+# all for operators who opted in. Node containers are minimal and do NOT inherit the
+# host's trust store, so a working `curl`/`docker pull` on the host doesn't mean
+# pulls inside the node will succeed.
+function inject_extra_ca_certs {
+    local cluster_name=$1
+    [[ -z "$EXTRA_CA_CERTS" ]] && return 0
+
+    local cert node base
+    local -a certs
+    IFS=':' read -ra certs <<<"$EXTRA_CA_CERTS"
+
+    for cert in "${certs[@]}"; do
+        if [[ ! -f "$cert" || ! -r "$cert" ]]; then
+            echo "Error: EXTRA_CA_CERTS entry not found or unreadable: '${cert}'" >&2
+            exit 1
+        fi
+    done
+
+    echo "Trusting ${#certs[@]} extra CA cert(s) inside cluster '${cluster_name}'..." >&2
+    for node in $(kind get nodes --name "$cluster_name"); do
+        for cert in "${certs[@]}"; do
+            base=$(basename "$cert")
+            run_cmd "$CONTAINER_RUNTIME" cp "$cert" "${node}:/usr/local/share/ca-certificates/${base}"
+        done
+        run_cmd "$CONTAINER_RUNTIME" exec "$node" update-ca-certificates
+        run_cmd "$CONTAINER_RUNTIME" exec "$node" systemctl restart containerd
+    done
+}
+
+# Remove each suffix in STRIP_DNS_SEARCH_DOMAINS (colon-separated) from the `search`
+# line of every node of $1's cluster /etc/resolv.conf. No-op when unset (the
+# default). A pod's DNS search list is built by combining the cluster's own
+# suffixes with whatever is in its NODE's resolv.conf, and Kubernetes' default pod
+# DNS policy sets `ndots:5` — trying every search suffix before the bare hostname
+# — so a leftover corporate suffix here can silently redirect ordinary external
+# lookups. /etc/resolv.conf inside a KinD node is a bind-mounted file that can't be
+# replaced by rename (sed -i fails with "Device or resource busy"), so this
+# rewrites it via a plain truncating write instead.
+function strip_dns_search_domains {
+    local cluster_name=$1
+    [[ -z "$STRIP_DNS_SEARCH_DOMAINS" ]] && return 0
+
+    local suffixes
+    suffixes=$(printf '%s' "$STRIP_DNS_SEARCH_DOMAINS" | tr ':' ' ')
+
+    echo "Stripping DNS search suffix(es) [${suffixes}] from cluster '${cluster_name}' nodes..." >&2
+    local node
+    for node in $(kind get nodes --name "$cluster_name"); do
+        # shellcheck disable=SC2016  # single-quoted on purpose: $1/$strip/$i must
+        # resolve inside the exec'd node's sh/awk, not this shell.
+        run_cmd "$CONTAINER_RUNTIME" exec "$node" sh -c '
+            strip="$1"
+            awk -v strip="$strip" "
+                BEGIN { n = split(strip, arr, \" \"); for (i = 1; i <= n; i++) bad[arr[i]] = 1 }
+                /^search / {
+                    out = \"search\"
+                    for (i = 2; i <= NF; i++) if (!(\$i in bad)) out = out \" \" \$i
+                    print out
+                    next
+                }
+                { print }
+            " /etc/resolv.conf >/tmp/resolv.conf.stripped &&
+            cat /tmp/resolv.conf.stripped >/etc/resolv.conf &&
+            rm -f /tmp/resolv.conf.stripped
+        ' sh "$suffixes"
+    done
+}
+
 function init_cluster {
     # --dry-run: preview the runtime prep + cluster create and touch nothing — no runtime
     # setup, no Podman machine, no `kind create`. (Shows the pinned-default create command.)
@@ -1133,6 +1228,8 @@ function init_cluster {
         case "$choice" in
             [Rr]*)
                 echo "Reusing existing cluster '${CLUSTER_NAME}'."
+                inject_extra_ca_certs "$CLUSTER_NAME"
+                strip_dns_search_domains "$CLUSTER_NAME"
                 return 0
                 ;;
             [Dd]*)
@@ -1167,6 +1264,9 @@ function init_cluster {
             run_cmd kind create cluster --name "${CLUSTER_NAME}" --config "$kind_config"
         fi
     fi
+
+    inject_extra_ca_certs "$CLUSTER_NAME"
+    strip_dns_search_domains "$CLUSTER_NAME"
 }
 
 # Fail early with a clear message if a Helm values file is missing or unreadable.

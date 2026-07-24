@@ -187,6 +187,26 @@ The script reads a few environment variables; all are optional.
 - **`NO_COLOR`** (default: _unset_) — set to any value to disable coloured output and the
   launch banner ([no-color.org](https://no-color.org)). Colour and the banner are also
   automatically disabled when output isn't a terminal (pipes, redirects, CI).
+- **`EXTRA_CA_CERTS`** (default: _unset_) — colon-separated paths to extra CA certificate
+  PEM files to trust inside every KinD node. For networks with a TLS-inspecting proxy
+  (Netskope, Zscaler, etc.) that re-signs outbound HTTPS with an internal CA: the host
+  trusts that CA, but a freshly created KinD node is a separate, minimal container and
+  does not inherit it, so image pulls inside the cluster fail with `x509: certificate
+  signed by unknown authority` even though `curl`/`docker pull` work fine on the host.
+  Set this to the corporate root CA's PEM path(s) and `-i`/`-n` will copy each cert into
+  every node and restart `containerd` so pulls pick up the new trust. Applied on cluster
+  creation and cluster reuse; a no-op when unset.
+- **`STRIP_DNS_SEARCH_DOMAINS`** (default: _unset_) — colon-separated DNS search-domain
+  suffixes to remove from every KinD node's `resolv.conf`. Kubernetes' default pod DNS
+  policy sets `ndots:5`, which tries every search suffix before the bare hostname — so if
+  your network puts an internal domain in the host's DNS search path (common on corporate
+  networks/VPNs), an ordinary external lookup like `registry.terraform.io` can get
+  rewritten to `registry.terraform.io.<your-suffix>` first. If that suffix's DNS zone
+  happens to resolve broadly (e.g. a wildcard record), a pod silently connects to the
+  wrong host and gets a hostname-mismatched TLS cert — with no CA-trust issue in sight to
+  explain it. Set this to the offending suffix(es) (e.g. your own or a customer's internal
+  domain) and `-i`/`-n` will strip them from every node's `search` line. Applied on
+  cluster creation and cluster reuse; a no-op when unset.
 
 ### Terminal output
 
